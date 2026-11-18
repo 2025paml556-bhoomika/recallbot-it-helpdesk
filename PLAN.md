@@ -39,16 +39,21 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 ---
 
 ## 1. Project setup (18 Nov) · supports all tasks
-- [ ] Create folders: `src/`, `skills/`, `tests/`, `data/kb/`, `db/`, `index/`, `memory/`, `logs/`, `results/plots/`
-- [ ] Fill in `requirements.txt` (sentence-transformers, faiss-cpu, numpy, pandas, matplotlib, transformers, pytest, requests, ollama/groq)
-- [ ] Choose the chat model and tokenizer, and use the same model for every configuration
-- [ ] Write `src/config.py`: model names, k=4, CONTEXT_WINDOW=4096, file paths, RUN_ID
-- [ ] Write `src/logger.py` with `log_call()`, which appends to `logs/calls.jsonl` and never edits it
-- [ ] Write `src/llm.py`: one wrapper for chat calls, with tokens taken from the API's usage field and latency measured
-- [ ] Start `README.md` with setup and run commands
-- [ ] Set up `.gitignore` and commit
+- [x] Create folders: `src/`, `skills/`, `tests/`, `data/kb/`, `db/`, `index/`, `memory/`, `logs/`, `results/plots/`
+- [x] Fill in `requirements.txt` (sentence-transformers, faiss-cpu, numpy, pandas, matplotlib, transformers, pytest, requests, ollama/groq)
+- [~] Choose the chat model and tokenizer, and use the same model for every configuration
+  - Done: Qwen2.5-3B via Ollama (`qwen2.5:3b`) with the matching `Qwen/Qwen2.5-3B` tokenizer, one model for every call so far.
+  - Still open: the "every configuration" part. The ablation configs (`no_rag`, `hybrid`, `hybrid_sem`, `hybrid_mem`) do not exist until Steps 6 and 10, so it cannot be shown yet.
+- [~] Write `src/config.py`: model names, k=4, CONTEXT_WINDOW=4096, file paths, RUN_ID
+  - Done: `K_TURNS`, `CONTEXT_WINDOW`, `CHAT_MODEL`, `TOKENIZER_MODEL`, `OLLAMA_HOST`, `RUN_ID`, `LOG_PATH`, `REQUIRED_DIRS`.
+  - Trimmed on purpose: `REPLY_RESERVE_TOKENS` and the data, database, index, memory and results paths were removed until the step that uses them (they return in Steps 2-9).
+- [x] Write `src/logger.py` with `log_call()`, which appends to `logs/calls.jsonl` and never edits it
+- [x] Write `src/llm.py`: one wrapper for chat calls, with tokens taken from the API's usage field and latency measured
+- [x] Start `README.md` with setup and run commands
+- [x] Set up `.gitignore` and commit
 
 **✅ Validate:** `pip install -r requirements.txt` succeeds, all folders exist, one test chat call through `src/llm.py` returns a reply, and `logs/calls.jsonl` gains exactly one line with all the required fields (run_id, call_type, model, input/output tokens, latency).
+  - Checked: folders exist, `pytest tests/test_step1.py` passes (2 offline, 2 live against Ollama), and `logs/calls.jsonl` has the smoke-test lines with every required field. The dependency install was verified earlier in the Step 1 session.
 
 ## 2. Knowledge base · Task 1 · depends on 1
 - [ ] Write 15+ IT documents in `data/kb/`, 4,000–8,000 words in total. Topics:
