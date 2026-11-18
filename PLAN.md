@@ -56,16 +56,22 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
   - Checked: folders exist, `pytest tests/test_step1.py` passes (2 offline, 2 live against Ollama), and `logs/calls.jsonl` has the smoke-test lines with every required field. The dependency install was verified earlier in the Step 1 session.
 
 ## 2. Knowledge base · Task 1 · depends on 1
-- [ ] Write 15+ IT documents in `data/kb/`, 4,000–8,000 words in total. Topics:
+- [x] Write 15+ IT documents in `data/kb/`, 4,000–8,000 words in total. Topics:
   - VPN, password and MFA policy, laptop refresh, software requests
   - email, Wi-Fi, printers, onboarding and offboarding
   - backup, acceptable use, incident severity, SLA, known outages, hardware catalogue
-- [ ] Include 10+ codes or IDs (`ERR-VPN-809`, `SLA-P1`, `SW-REQ-112`, `LAP-T14G3`, ...)
-- [ ] Write 2+ old/new document pairs (Password Policy 2025 vs 2026, Laptop Refresh 2025 vs 2026), with `version`, `valid_from` and `status` in each file's header
-- [ ] Check that the documents don't contradict each other
-- [ ] Count the words with a script and record the total
+  - 18 files written, 4,418 words
+- [x] Include 10+ codes or IDs (`ERR-VPN-809`, `SLA-P1`, `SW-REQ-112`, `LAP-T14G3`, ...)
+  - 43 unique codes
+- [x] Write 2+ old/new document pairs (Password Policy 2025 vs 2026, Laptop Refresh 2025 vs 2026), with `version`, `valid_from` and `status` in each file's header
+  - `KB-PASSWORD` and `KB-LAPTOP` each have a 2025.1 (superseded) and a 2026.1 (active)
+- [x] Check that the documents don't contradict each other
+  - 2025 files defer to their 2026 pair; laptop, password, quota and VPN facts agree across the 2026 set
+- [x] Count the words with a script and record the total
+  - `src/kb_stats.py`: 4,418 words
 
 **✅ Validate:** `python -m src.kb_stats` reports 15+ files, a total of 4,000–8,000 words, 10+ unique codes (found by regex) and 2+ `doc_id`s with both a 2025 and a 2026 version; every file header has `version`, `valid_from` and `status`.
+  - Checked: PASS. 18 files, 4,418 words, 43 unique codes, 2 versioned doc_ids, every header complete.
 
 ## 3. Test data and probes · Task 1 (2 marks) · depends on 2
 - [ ] `data/test_conversation.json`: 40+ turns, Session A = turns 1–25, Session B = 26+, with turns from both **U1 and U2**

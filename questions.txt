@@ -1,0 +1,59 @@
+what is data/kb folder about
+Whats the need of index folder
+what is results/plots
+what is skills
+Explain following:
+K_TURNS = 4
+CONTEXT_WINDOW = 4096
+REPLY_RESERVE_TOKENS = 500
+
+--------------------------------------------------------------------------------
+ANSWERS
+--------------------------------------------------------------------------------
+
+what is data/kb folder about
+  The knowledge base: the IT helpdesk documents the bot is allowed to answer
+  from (VPN, password policy, laptop refresh, SLA, and so on). Step 2 puts
+  15+ files here, 4,000-8,000 words in total, including old and new versions
+  such as Password Policy 2025 and 2026. It is shared by every user. Personal
+  facts do not go here.
+
+Whats the need of index folder
+  Retrieval cannot re-read data/kb on every question. Step 4 splits those
+  documents into chunks, embeds the chunks, and saves a FAISS index plus each
+  chunk's metadata (doc_id, version, status) in index/. At question time the
+  bot searches this index instead of the raw files. Rebuild it when the
+  documents change; do not edit it by hand.
+
+what is results/plots
+  Figures and tables for the report, produced from the logs rather than drawn
+  by hand. The first plot is input tokens per turn for the full, trim, and
+  summary strategies. Later CSVs (hit_rate.csv, probe_results.csv) live under
+  results/.
+
+what is skills
+  Procedural memory: instructions loaded from disk at run time, not hard-coded.
+  Step 5 adds two files:
+    skills/system_prompt_v1.md   persona, scope, and error handling
+    skills/book_slot_steps_v1.md the step-by-step ticket booking flow
+  Editing a file changes the bot's behaviour with no code change. The version
+  suffix makes a prompt change traceable.
+
+K_TURNS = 4
+  The short-term memory window. Under the trim strategy only the last 4 turns
+  of the chat go back into the prompt; older turns are dropped, so a fact
+  from turn 3 can be missing by turn 20. full keeps everything; summary keeps
+  a rolling summary plus the last 2 turns. 4 is fixed by the variant brief.
+
+CONTEXT_WINDOW = 4096
+  The maximum tokens the model accepts in one call. The system prompt, tools,
+  memories, history, retrieved chunks, and the current question must all fit
+  inside it. Fixed by the brief (variant C is 2048; this variant is 4096).
+
+REPLY_RESERVE_TOKENS = 500
+  Tokens held back so the model has room to write its answer. The assembled
+  prompt is capped at 4096 - 500 = 3596 tokens; if it would overflow, the
+  lowest-priority parts are cut first. The system prompt is never cut.
+  Not in src/config.py yet: it was trimmed out of Step 1 because nothing uses
+  it until Step 9 (src/context_builder.py), which is where the budget is
+  enforced.
