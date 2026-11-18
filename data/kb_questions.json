@@ -1,0 +1,227 @@
+{
+  "description": "Retrieval test questions for the IT helpdesk knowledge base. gold_span is copied verbatim from the named document, and version says which copy of that doc_id holds it. subtype is code (the question contains an exact code or ID), paraphrase (the question shares no content word with the answer span) or versioned (the answer exists only in the 2026 copy). A question may carry more than one subtype.",
+  "questions": [
+    {
+      "id": "Q01",
+      "question": "What does ERR-VPN-809 mean?",
+      "doc_id": "KB-VPN",
+      "version": "2026.1",
+      "gold_span": "ERR-VPN-809 means the client reached the gateway but the certificate check failed.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q02",
+      "question": "What does ERR-VPN-412 mean?",
+      "doc_id": "KB-VPN",
+      "version": "2026.1",
+      "gold_span": "ERR-VPN-412 means the account is not in the remote-access group.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q03",
+      "question": "What does ERR-VPN-102 mean?",
+      "doc_id": "KB-VPN",
+      "version": "2026.1",
+      "gold_span": "ERR-VPN-102 means the gateway rejected the password.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q04",
+      "question": "What does SLA-P1 promise for a first response and a restore?",
+      "doc_id": "KB-SLA",
+      "version": "2026.1",
+      "gold_span": "SLA-P1 covers SEV-1. First response is within 15 minutes and the restore target is 4 hours.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q05",
+      "question": "What first response and restore target does SLA-P2 set?",
+      "doc_id": "KB-SLA",
+      "version": "2026.1",
+      "gold_span": "SLA-P2 covers SEV-2. First response is within 1 hour and the restore target is 8 hours.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q06",
+      "question": "What is the catalogue code SW-VPN-AC?",
+      "doc_id": "KB-SOFTWARE",
+      "version": "2026.1",
+      "gold_span": "Standard examples are the Cisco AnyConnect client SW-VPN-AC, the password manager SW-PWM-01, and the Office suite SW-OFFICE-365.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q07",
+      "question": "What is the request code SW-REQ-112 used for, and how long does its review take?",
+      "doc_id": "KB-SOFTWARE",
+      "version": "2026.1",
+      "gold_span": "A request for software the catalogue does not hold uses the code SW-REQ-112.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q08",
+      "question": "Which laptop replaced the LAP-T14G3 as the standard Windows build?",
+      "doc_id": "KB-LAPTOP",
+      "version": "2026.1",
+      "gold_span": "The standard Windows laptop is the LAP-T14G5, a 14 inch ThinkPad with 32 GB of memory and a 1 TB drive.",
+      "subtypes": ["code", "versioned"]
+    },
+    {
+      "id": "Q09",
+      "question": "What specification was the LAP-T14G3 ordered with under the old programme?",
+      "doc_id": "KB-LAPTOP",
+      "version": "2025.1",
+      "gold_span": "The default Windows laptop was the LAP-T14G3, a 14 inch ThinkPad with 16 GB of memory and a 512 GB drive.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q10",
+      "question": "How long is a passphrase kept before it must be replaced, under the current rules?",
+      "doc_id": "KB-PASSWORD",
+      "version": "2026.1",
+      "gold_span": "There is no periodic expiry: a password is changed only when there is a reason, such as a suspected leak, a shared use, or a leaver's account being reclaimed.",
+      "subtypes": ["paraphrase", "versioned"],
+      "overlap_note": "Question words: long, passphrase, kept, replaced, current, rules. None of these appear in the span."
+    },
+    {
+      "id": "Q11",
+      "question": "How often did staff have to pick a new passphrase under the retired rules?",
+      "doc_id": "KB-PASSWORD",
+      "version": "2025.1",
+      "gold_span": "Users changed it every 90 days.",
+      "subtypes": ["paraphrase"],
+      "overlap_note": "Question words: often, staff, pick, new, passphrase, retired, rules. The span has none of them."
+    },
+    {
+      "id": "Q12",
+      "question": "How do I get a document onto paper at the office, and how do I collect it?",
+      "doc_id": "KB-PRINTERS",
+      "version": "2026.1",
+      "gold_span": "The user sends the job from the laptop and releases it at any device on that floor by tapping their badge.",
+      "subtypes": ["paraphrase"],
+      "overlap_note": "Question words: document, paper, office, collect. None appear in the span."
+    },
+    {
+      "id": "Q13",
+      "question": "How much mail can one person accumulate before the box refuses more?",
+      "doc_id": "KB-EMAIL",
+      "version": "2026.1",
+      "gold_span": "A user mailbox holds 50 GB.",
+      "subtypes": ["paraphrase"],
+      "overlap_note": "Question words: much, mail, person, accumulate, box, refuses. The span says mailbox, not mail or box."
+    },
+    {
+      "id": "Q14",
+      "question": "For how long may a visitor stay on the open wireless network?",
+      "doc_id": "KB-WIFI",
+      "version": "2026.1",
+      "gold_span": "A guest pass lasts eight hours, is created by any employee from the intranet, and throttles each device to 5 megabits per second.",
+      "subtypes": ["paraphrase"],
+      "overlap_note": "Question words: long, visitor, stay, open, wireless, network. The span has none of them."
+    },
+    {
+      "id": "Q15",
+      "question": "What should someone do with their files before handing a machine back?",
+      "doc_id": "KB-LAPTOP",
+      "version": "2026.1",
+      "gold_span": "Data on the old drive is wiped against the certificate standard on the day it reaches the build room.",
+      "subtypes": ["paraphrase"],
+      "overlap_note": "Question words: someone, files, handing, machine, back. None appear in the span."
+    },
+    {
+      "id": "Q16",
+      "question": "What is the shortest password allowed today, and which character types must it contain?",
+      "doc_id": "KB-PASSWORD",
+      "version": "2026.1",
+      "gold_span": "A network password must be at least 14 characters long. It must contain lowercase letters, uppercase letters and a digit.",
+      "subtypes": ["versioned"]
+    },
+    {
+      "id": "Q17",
+      "question": "How long is the laptop refresh cycle in the current programme?",
+      "doc_id": "KB-LAPTOP",
+      "version": "2026.1",
+      "gold_span": "The refresh cycle is three years from the date the asset was issued.",
+      "subtypes": ["versioned"]
+    },
+    {
+      "id": "Q18",
+      "question": "How long does a VPN session last before it drops?",
+      "doc_id": "KB-VPN",
+      "version": "2026.1",
+      "gold_span": "A session lasts twelve hours and then drops.",
+      "subtypes": []
+    },
+    {
+      "id": "Q19",
+      "question": "What is the VPN gateway address?",
+      "doc_id": "KB-VPN",
+      "version": "2026.1",
+      "gold_span": "The gateway address is vpn.corp.example.com.",
+      "subtypes": []
+    },
+    {
+      "id": "Q20",
+      "question": "Is printing to a home printer supported while the VPN is connected?",
+      "doc_id": "KB-PRINTERS",
+      "version": "2026.1",
+      "gold_span": "There is no supported way to print to a home printer while the VPN is connected, because split tunnelling is off.",
+      "subtypes": []
+    },
+    {
+      "id": "Q21",
+      "question": "How long is mail retained, including deleted items?",
+      "doc_id": "KB-EMAIL",
+      "version": "2026.1",
+      "gold_span": "Mail is kept for seven years, including deleted items, because of the finance retention rule.",
+      "subtypes": []
+    },
+    {
+      "id": "Q22",
+      "question": "What does SEV-1 mean?",
+      "doc_id": "KB-INCIDENT",
+      "version": "2026.1",
+      "gold_span": "SEV-1 is a complete loss of a core service for a large part of the company, or a confirmed exposure of sensitive data.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q23",
+      "question": "How many fallback codes does SW-PWM-01 hold for a user, and how many times does each work?",
+      "doc_id": "KB-MFA",
+      "version": "2026.1",
+      "gold_span": "Save the ten fallback codes into SW-PWM-01. Each code works a single time.",
+      "subtypes": ["code"]
+    },
+    {
+      "id": "Q24",
+      "question": "When are the directory and the VPN gateway patched?",
+      "doc_id": "KB-OUTAGES",
+      "version": "2026.1",
+      "gold_span": "The directory and the VPN gateway are patched on the second Tuesday of each month, between 22:00 and 23:30 India time.",
+      "subtypes": []
+    },
+    {
+      "id": "Q25",
+      "question": "How often does laptop backup run, and what does it cover?",
+      "doc_id": "KB-BACKUP",
+      "version": "2026.1",
+      "gold_span": "The backup service covers the home drive, the desktop and the documents folder of every company laptop, plus the shared drives.",
+      "subtypes": []
+    },
+    {
+      "id": "Q26",
+      "question": "When is a leaver's account disabled?",
+      "doc_id": "KB-OFFBOARD",
+      "version": "2026.1",
+      "gold_span": "At 18:00 local time the account is disabled, active VPN sessions are dropped, and the authenticator enrolment is revoked.",
+      "subtypes": []
+    },
+    {
+      "id": "Q27",
+      "question": "What must a joiner finish before shared drives become writable?",
+      "doc_id": "KB-ONBOARD",
+      "version": "2026.1",
+      "gold_span": "Until the acknowledgement is recorded, access to shared drives stays read-only.",
+      "subtypes": []
+    }
+  ]
+}

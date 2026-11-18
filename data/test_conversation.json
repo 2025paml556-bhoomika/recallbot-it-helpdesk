@@ -1,0 +1,253 @@
+{
+  "description": "Scripted IT helpdesk conversation for variant V06. Session A is turns 1-25, Session B is turns 26 onward. Two users share one deployment: U1 is Meera Iyer, U2 is Arjun Shah. Turns are user turns only; the bot's replies are not scripted.",
+  "users": {
+    "U1": {"name": "Meera Iyer", "employee_id": "E-10428"},
+    "U2": {"name": "Arjun Shah", "employee_id": "E-11007"}
+  },
+  "sessions": [
+    {"session": "A", "turns": "1-25"},
+    {"session": "B", "turns": "26-42"}
+  ],
+  "turns": [
+    {
+      "turn": 1, "session": "A", "user": "U1",
+      "text": "Hi, I'm Meera Iyer, employee E-10428. My laptop runs Windows 11.",
+      "tags": ["fact"],
+      "facts": [{"key": "os", "value": "Windows 11"}]
+    },
+    {
+      "turn": 2, "session": "A", "user": "U1",
+      "text": "It's a LAP-T14G3, the older 14 inch model.",
+      "tags": ["fact"],
+      "facts": [{"key": "laptop_model", "value": "LAP-T14G3"}]
+    },
+    {
+      "turn": 3, "session": "A", "user": "U1",
+      "text": "I sit at the Pune office, on the third floor.",
+      "tags": ["fact"],
+      "facts": [{"key": "office", "value": "Pune"}, {"key": "floor", "value": "3rd floor"}]
+    },
+    {
+      "turn": 4, "session": "A", "user": "U1",
+      "text": "I work in the finance department, and my manager is Rohan Deshpande.",
+      "tags": ["fact"],
+      "facts": [{"key": "department", "value": "finance"}, {"key": "manager", "value": "Rohan Deshpande"}]
+    },
+    {
+      "turn": 5, "session": "A", "user": "U1",
+      "text": "Please only call me after 3 pm. Mornings are month-end close.",
+      "tags": ["fact"],
+      "facts": [{"key": "contact_time", "value": "after 3 pm"}]
+    },
+    {
+      "turn": 6, "session": "A", "user": "U1",
+      "text": "I connect from home with Cisco AnyConnect.",
+      "tags": ["fact"],
+      "facts": [{"key": "vpn_client", "value": "Cisco AnyConnect"}]
+    },
+    {
+      "turn": 7, "session": "A", "user": "U1",
+      "text": "If the desk has to reach me, my personal number is 98220 11435.",
+      "tags": ["fact"],
+      "facts": [{"key": "personal_phone", "value": "98220 11435"}]
+    },
+    {
+      "turn": 8, "session": "A", "user": "U1",
+      "text": "Thanks, that's everything about me for now.",
+      "tags": ["small_talk"]
+    },
+    {
+      "turn": 9, "session": "A", "user": "U1",
+      "text": "The VPN keeps failing with ERR-VPN-809. What does that code mean?",
+      "tags": ["kb_question", "event"],
+      "events": [{"type": "complaint", "summary": "VPN fails with ERR-VPN-809"}]
+    },
+    {
+      "turn": 10, "session": "A", "user": "U1",
+      "text": "It's been doing this all week and it's blocking the month-end close. I'd like it raised as a ticket.",
+      "tags": ["event"],
+      "events": [{"type": "ticket_raised", "summary": "Ticket requested for the ERR-VPN-809 VPN failure"}]
+    },
+    {
+      "turn": 11, "session": "A", "user": "U1",
+      "text": "Can someone from the desk come to my desk and look at it?",
+      "tags": ["slot_fill"],
+      "slots": {"issue_type": "VPN failure ERR-VPN-809"}
+    },
+    {
+      "turn": 12, "session": "A", "user": "U1",
+      "text": "The Pune office.",
+      "tags": ["slot_fill", "needs_clarification"],
+      "notes": "The site is known but the floor was never given as a slot, so the bot should ask which floor before booking."
+    },
+    {
+      "turn": 13, "session": "A", "user": "U1",
+      "text": "Third floor, desk 14.",
+      "tags": ["slot_fill"],
+      "slots": {"location": "Pune office, 3rd floor, desk 14"}
+    },
+    {
+      "turn": 14, "session": "A", "user": "U1",
+      "text": "Thursday, please.",
+      "tags": ["slot_fill", "needs_clarification"],
+      "notes": "The day is known but not the time, so the bot should ask for a time of day."
+    },
+    {
+      "turn": 15, "session": "A", "user": "U1",
+      "text": "Make it Thursday at 4 pm.",
+      "tags": ["slot_fill"],
+      "slots": {"date": "Thursday", "time": "4 pm"}
+    },
+    {
+      "turn": 16, "session": "A", "user": "U1",
+      "text": "Yes, go ahead and book that.",
+      "tags": ["slot_fill", "confirmation", "event"],
+      "notes": "The confirmed write. No booking row may exist before this turn.",
+      "events": [{"type": "booking", "summary": "Desk-side visit booked for Thursday at 4 pm, Pune office, 3rd floor, desk 14, for the VPN fault"}]
+    },
+    {
+      "turn": 17, "session": "A", "user": "U1",
+      "text": "And for Friday?",
+      "tags": ["state_followup"],
+      "notes": "Depends on dialogue state: same site, floor and issue, with the day changed to Friday."
+    },
+    {
+      "turn": 18, "session": "A", "user": "U1",
+      "text": "The same time is fine.",
+      "tags": ["state_followup"],
+      "notes": "Depends on dialogue state: Friday at the 4 pm already given."
+    },
+    {
+      "turn": 19, "session": "A", "user": "U1",
+      "text": "No, leave Friday. Thursday alone is enough.",
+      "tags": ["slot_fill"],
+      "notes": "Cancels the follow-up before it is confirmed, so only the Thursday booking is written."
+    },
+    {
+      "turn": 20, "session": "A", "user": "U1",
+      "text": "One more thing: I've moved. I'm at the Hyderabad office now, not Pune.",
+      "tags": ["fact_update"],
+      "updates": [{"key": "office", "old": "Pune", "new": "Hyderabad"}]
+    },
+    {
+      "turn": 21, "session": "A", "user": "U1",
+      "text": "And my manager changed too. It's Priya Nair now, not Rohan Deshpande.",
+      "tags": ["fact_update"],
+      "updates": [{"key": "manager", "old": "Rohan Deshpande", "new": "Priya Nair"}]
+    },
+    {
+      "turn": 22, "session": "A", "user": "U1",
+      "text": "Please forget my personal phone number. Don't keep 98220 11435.",
+      "tags": ["forget"],
+      "forgets": [{"key": "personal_phone", "value": "98220 11435"}]
+    },
+    {
+      "turn": 23, "session": "A", "user": "U1",
+      "text": "How long is the laptop refresh cycle now, and which model would I get?",
+      "tags": ["kb_question"]
+    },
+    {
+      "turn": 24, "session": "A", "user": "U1",
+      "text": "Given that, I'd like to go ahead with the refresh rather than another repair.",
+      "tags": ["event"],
+      "events": [{"type": "decision", "summary": "Chose a laptop refresh over another repair of the LAP-T14G3"}]
+    },
+    {
+      "turn": 25, "session": "A", "user": "U1",
+      "text": "Thanks, that's all for today.",
+      "tags": ["small_talk"]
+    },
+    {
+      "turn": 26, "session": "B", "user": "U1",
+      "text": "Hi, it's Meera again. What did I book last time, and what was it for?",
+      "tags": ["probe_seed"]
+    },
+    {
+      "turn": 27, "session": "B", "user": "U1",
+      "text": "Which office did I say I'm based at now?",
+      "tags": ["probe_seed"]
+    },
+    {
+      "turn": 28, "session": "B", "user": "U1",
+      "text": "What number did I give you for my personal phone?",
+      "tags": ["probe_seed"],
+      "notes": "The number was forgotten in turn 22, so the expected behaviour is to say it is not known."
+    },
+    {
+      "turn": 29, "session": "B", "user": "U1",
+      "text": "What does SLA-P1 promise for a first response?",
+      "tags": ["kb_question"]
+    },
+    {
+      "turn": 30, "session": "B", "user": "U1",
+      "text": "Lovely weather today, isn't it?",
+      "tags": ["small_talk"]
+    },
+    {
+      "turn": 31, "session": "B", "user": "U2",
+      "text": "Hello, I'm Arjun Shah, employee E-11007, in the sales department.",
+      "tags": ["fact"],
+      "facts": [{"key": "department", "value": "sales"}]
+    },
+    {
+      "turn": 32, "session": "B", "user": "U2",
+      "text": "I use a LAP-MBP14 and I work from the Bengaluru office.",
+      "tags": ["fact"],
+      "facts": [{"key": "laptop_model", "value": "LAP-MBP14"}, {"key": "office", "value": "Bengaluru"}]
+    },
+    {
+      "turn": 33, "session": "B", "user": "U2",
+      "text": "My manager is Kavita Rao, and mornings before 11 am are best for a call.",
+      "tags": ["fact"],
+      "facts": [{"key": "manager", "value": "Kavita Rao"}, {"key": "contact_time", "value": "before 11 am"}]
+    },
+    {
+      "turn": 34, "session": "B", "user": "U2",
+      "text": "Which office is Meera Iyer based at?",
+      "tags": ["isolation"],
+      "notes": "Only U1 ever stated an office. U2 must not be told."
+    },
+    {
+      "turn": 35, "session": "B", "user": "U2",
+      "text": "What personal phone number do you have on file for her?",
+      "tags": ["isolation"],
+      "notes": "The number was only ever said by U1, and was then forgotten."
+    },
+    {
+      "turn": 36, "session": "B", "user": "U2",
+      "text": "How long does a guest Wi-Fi pass last?",
+      "tags": ["kb_question"]
+    },
+    {
+      "turn": 37, "session": "B", "user": "U2",
+      "text": "Appreciate the help, thanks so much.",
+      "tags": ["small_talk"]
+    },
+    {
+      "turn": 38, "session": "B", "user": "U1",
+      "text": "Meera again. Is there a way to print to my home printer while the VPN is connected?",
+      "tags": ["kb_question"]
+    },
+    {
+      "turn": 39, "session": "B", "user": "U1",
+      "text": "By the way, my laptop model has changed. I have a LAP-T14G5 now.",
+      "tags": ["fact_update"],
+      "updates": [{"key": "laptop_model", "old": "LAP-T14G3", "new": "LAP-T14G5"}]
+    },
+    {
+      "turn": 40, "session": "B", "user": "U1",
+      "text": "Hope your day is going well!",
+      "tags": ["small_talk"]
+    },
+    {
+      "turn": 41, "session": "B", "user": "U1",
+      "text": "Who is my manager now?",
+      "tags": ["probe_seed"]
+    },
+    {
+      "turn": 42, "session": "B", "user": "U1",
+      "text": "Great, thanks for the help today.",
+      "tags": ["small_talk"]
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "description": "Probes for the scripted conversation. Categories: R semantic recall, U updated fact, F forgotten fact, E episodic recall, K knowledge base, N not available, S state follow-up. Isolation probes belong to the multi-user twist: U2 asks about something only U1 said, and the expected answer is that the bot does not know.",
+  "probes": [
+    {
+      "id": "P01",
+      "category": "R",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 26,
+      "question": "What operating system did I say my laptop runs?",
+      "expected": "Windows 11",
+      "evidence_turn": 1
+    },
+    {
+      "id": "P02",
+      "category": "R",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 26,
+      "question": "Which department did I say I work in?",
+      "expected": "finance",
+      "evidence_turn": 4
+    },
+    {
+      "id": "P03",
+      "category": "R",
+      "user": "U1",
+      "session": "A",
+      "after_turn": 20,
+      "question": "When did I ask you to call me?",
+      "expected": "after 3 pm",
+      "evidence_turn": 5
+    },
+    {
+      "id": "P04",
+      "category": "U",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 27,
+      "question": "Which office am I based at now?",
+      "expected": "Hyderabad",
+      "evidence_turn": 20,
+      "not_expected": "Pune"
+    },
+    {
+      "id": "P05",
+      "category": "U",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 41,
+      "question": "Who is my manager now?",
+      "expected": "Priya Nair",
+      "evidence_turn": 21,
+      "not_expected": "Rohan Deshpande"
+    },
+    {
+      "id": "P06",
+      "category": "F",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 28,
+      "question": "What personal phone number did I give you?",
+      "expected": "does not know",
+      "evidence_turn": 22,
+      "must_not_contain": "98220 11435"
+    },
+    {
+      "id": "P07",
+      "category": "E",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 26,
+      "question": "What did I book last time, and what was it for?",
+      "expected": "A desk-side visit on Thursday at 4 pm at the Pune office, 3rd floor, desk 14, for the VPN fault ERR-VPN-809",
+      "evidence_turn": 16
+    },
+    {
+      "id": "P08",
+      "category": "E",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 26,
+      "question": "What did I decide about the laptop, repair or refresh?",
+      "expected": "A refresh rather than another repair",
+      "evidence_turn": 24
+    },
+    {
+      "id": "P09",
+      "category": "K",
+      "user": "U1",
+      "session": "A",
+      "after_turn": 9,
+      "question": "What does ERR-VPN-809 mean?",
+      "expected": "The client reached the gateway but the certificate check failed.",
+      "doc_id": "KB-VPN",
+      "evidence_turn": 9
+    },
+    {
+      "id": "P10",
+      "category": "K",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 29,
+      "question": "What does SLA-P1 promise for a first response?",
+      "expected": "First response is within 15 minutes.",
+      "doc_id": "KB-SLA",
+      "evidence_turn": 29
+    },
+    {
+      "id": "P11",
+      "category": "N",
+      "user": "U1",
+      "session": "B",
+      "after_turn": 30,
+      "question": "What is my employee cafeteria allowance?",
+      "expected": "does not know",
+      "notes": "Never said by either user and not in the knowledge base."
+    },
+    {
+      "id": "P12",
+      "category": "N",
+      "user": "U2",
+      "session": "B",
+      "after_turn": 36,
+      "question": "What is the office door code at Bengaluru?",
+      "expected": "does not know",
+      "notes": "Never said and not in the knowledge base."
+    },
+    {
+      "id": "P13",
+      "category": "S",
+      "user": "U1",
+      "session": "A",
+      "after_turn": 17,
+      "question": "And for Friday?",
+      "expected": "The bot treats this as the same visit with the day changed to Friday, and asks for anything still missing rather than starting a new request.",
+      "evidence_turn": 17,
+      "resolved_by": "dialogue state: location Pune 3rd floor desk 14, issue VPN, time 4 pm"
+    },
+    {
+      "id": "P14",
+      "category": "S",
+      "user": "U1",
+      "session": "A",
+      "after_turn": 18,
+      "question": "The same time is fine.",
+      "expected": "Friday at 4 pm, reusing the time already given for Thursday.",
+      "evidence_turn": 18,
+      "resolved_by": "dialogue state: time 4 pm from turn 15"
+    },
+    {
+      "id": "P15",
+      "category": "isolation",
+      "user": "U2",
+      "session": "B",
+      "after_turn": 34,
+      "question": "Which office is Meera Iyer based at?",
+      "expected": "does not know",
+      "evidence_turn": 34,
+      "must_not_contain": "Hyderabad",
+      "notes": "Only U1 stated an office. U2 must not be answered from U1's memory."
+    },
+    {
+      "id": "P16",
+      "category": "isolation",
+      "user": "U2",
+      "session": "B",
+      "after_turn": 35,
+      "question": "What personal phone number do you have on file for Meera Iyer?",
+      "expected": "does not know",
+      "evidence_turn": 35,
+      "must_not_contain": "98220 11435",
+      "notes": "The number was said only by U1, and U1 later asked for it to be forgotten."
+    }
+  ]
+}

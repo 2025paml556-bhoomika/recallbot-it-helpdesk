@@ -74,19 +74,31 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
   - Checked: PASS. 18 files, 4,418 words, 43 unique codes, 2 versioned doc_ids, every header complete.
 
 ## 3. Test data and probes · Task 1 (2 marks) · depends on 2
-- [ ] `data/test_conversation.json`: 40+ turns, Session A = turns 1–25, Session B = 26+, with turns from both **U1 and U2**
-  - [ ] 8+ user facts, each tagged with its turn (OS, laptop, office, department, manager, contact time, VPN client, phone)
-  - [ ] 2+ updates (e.g. Pune → Hyderabad office) and 1+ forget request (e.g. personal phone number)
-  - [ ] 3+ notable events (ticket raised, complaint, upgrade decision) and 5+ small-talk turns
-  - [ ] 1 complete slot-filling task that ends with a confirmed database write
-  - [ ] 2+ follow-ups that depend on the conversation state ("And for Friday?") and 1+ turn that needs a clarifying question
-  - [ ] 5+ knowledge-base questions spread across both sessions
-- [ ] `data/kb_questions.json`: 25+ questions, each with its gold answer span and `doc_id`
-  - [ ] 5+ containing a code, 5+ reworded with no keywords shared with the answer, 2+ answered only by the newer version
-- [ ] `data/probes.json`: 14+ probes covering all 7 types (recalled fact, updated fact, forgotten fact, past event, document answer, never said, follow-up)
-  - [ ] 2+ **isolation probes**: U2 asks about something only U1 said, and the expected answer is "I don't know"
+- [x] `data/test_conversation.json`: 40+ turns, Session A = turns 1–25, Session B = 26+, with turns from both **U1 and U2**
+  - 42 user turns. U1 is Meera Iyer (Session A and part of B); U2 is Arjun Shah (Session B)
+  - [x] 8+ user facts, each tagged with its turn (OS, laptop, office, department, manager, contact time, VPN client, phone)
+    - 14 facts
+  - [x] 2+ updates (e.g. Pune → Hyderabad office) and 1+ forget request (e.g. personal phone number)
+    - 3 updates (office, manager, laptop model) and 1 forget (personal phone, turn 22)
+  - [x] 3+ notable events (ticket raised, complaint, upgrade decision) and 5+ small-talk turns
+    - 4 events, 6 small-talk turns
+  - [x] 1 complete slot-filling task that ends with a confirmed database write
+    - desk-side visit, confirmed at turn 16; the Friday follow-up is withdrawn before confirmation
+  - [x] 2+ follow-ups that depend on the conversation state ("And for Friday?") and 1+ turn that needs a clarifying question
+    - turns 17 and 18; turns 12 and 14 need clarification
+  - [x] 5+ knowledge-base questions spread across both sessions
+    - 5 questions, in both sessions
+- [x] `data/kb_questions.json`: 25+ questions, each with its gold answer span and `doc_id`
+  - 27 questions
+  - [x] 5+ containing a code, 5+ reworded with no keywords shared with the answer, 2+ answered only by the newer version
+    - 11 code, 6 paraphrase, 4 versioned
+- [x] `data/probes.json`: 14+ probes covering all 7 types (recalled fact, updated fact, forgotten fact, past event, document answer, never said, follow-up)
+  - 16 probes, every category R, U, F, E, K, N, S present
+  - [x] 2+ **isolation probes**: U2 asks about something only U1 said, and the expected answer is "I don't know"
+    - P15 (Meera's office) and P16 (Meera's phone), both expected "does not know"
 
 **✅ Validate:** `python -m src.validate_data` checks every minimum count above (turns, facts, updates, forgets, events, small talk, follow-ups, users U1 and U2, the 25+ questions with their subtypes, 14+ probes across all 7 types, 2+ isolation probes), and confirms that each gold answer span appears word for word in its `doc_id` file.
+  - Checked: PASS, every line ok.
 
 ## 4. Retrieval: chunking, embeddings, BM25, RRF · Task 3(a), 3(b) (2.5 marks) · depends on 2, 3
 - [ ] `src/chunker.py`: split by token count at 2 sizes (128 and 512) with about 15% overlap, using the chat model's tokenizer
