@@ -1,0 +1,62 @@
+# RecallBot V06
+
+Corporate IT helpdesk bot for PCA MZG517 Mini Project 1 (variant V06, twist A: multi-user isolation).
+
+**Chat model (every configuration):** `qwen2.5:3b` served by [Ollama](https://ollama.com).
+**Tokenizer (when a response has no usage field):** `Qwen/Qwen2.5-3B`.
+**Context window:** 4,096 tokens. **Short-term window k:** 4 turns.
+
+## Setup
+
+Python 3.10 or later.
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Ollama must be running with the chosen model pulled once:
+
+```bash
+ollama pull qwen2.5:3b
+ollama serve   # if it is not already running
+```
+
+## Run
+
+Step 1 check — one chat call, logged to `logs/calls.jsonl`:
+
+```bash
+python -m src.llm_smoke
+```
+
+From a fresh shell the same call is:
+
+```bash
+python -c "from src.llm import chat; print(chat('Say hello'))"
+```
+
+`RUN_ID` defaults to `r01`. Set a new id for every later run (do not edit old log lines):
+
+```bash
+RECALLBOT_RUN_ID=r02 python -m src.llm_smoke
+```
+
+## Layout
+
+| Path | Role |
+|---|---|
+| `src/` | Pipeline code. `config.py`, `logger.py`, `llm.py` land in Step 1 |
+| `skills/` | Versioned system prompt and slot-filling steps (Step 5) |
+| `tests/` | pytest, including the Step 1 log and config checks |
+| `data/kb/` | IT helpdesk documents (Step 2) |
+| `db/` | SQLite helpdesk database (Step 5) |
+| `index/` | FAISS index and chunk metadata (Step 4) |
+| `memory/` | Semantic and episodic stores (Steps 7–8) |
+| `logs/calls.jsonl` | Append-only call log. Never edit lines |
+| `results/plots/` | Token and evaluation plots |
+
+## Logging
+
+`src.logger.log_call()` only appends. Each successful LLM call adds one JSON line with `ts`, `run_id`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens` and `latency_ms`. Token counts are the API's `prompt_eval_count` and `eval_count`. A failed call writes nothing.

@@ -1,0 +1,14 @@
+# RecallBot V06 — pinned to versions known to install on Python 3.11 / 3.12.
+# The chat model itself is served by Ollama (see README); this file is the Python side.
+
+sentence-transformers==3.3.1
+faiss-cpu==1.9.0.post1
+numpy==1.26.4
+pandas==2.2.3
+matplotlib==3.9.2
+transformers==4.46.3
+pytest==8.3.4
+requests==2.32.3
+ollama==0.4.4
+tokenizers==0.20.3
+huggingface-hub==0.26.5
