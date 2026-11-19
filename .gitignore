@@ -19,6 +19,10 @@ venv/
 logs/*.jsonl
 results/test_report_step*.txt
 
+# Rebuilt by `python -m src.vector_index`.
+index/*.faiss
+index/*.jsonl
+
 # Local model caches
 .cache/
 models/
