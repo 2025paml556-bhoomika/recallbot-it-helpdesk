@@ -120,11 +120,12 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 
 ## 5. Dialogue pipeline and procedural memory · Task 2(a) (1.5 marks) · depends on 4
 - [ ] `db/helpdesk.sqlite`: tables `tickets`, `slots`, `assets`, each with an `owner_user` column
-- [ ] `src/tools.py`:
+- [x] `src/tools.py`:
   - `search_kb(query)`
   - `get_ticket(ticket_id, user)` checks the owner, for isolation
   - `book_it_slot(...)` runs only after the user confirms
   - Every tool call is logged with 0 tokens
+  - Checked: `pytest tests/test_tools.py` (3 passed). U2 on U1's ticket returns "not found"; no slot row before confirmation and exactly one after; tool lines have 0 tokens.
 - [ ] `src/nlu.py`: hybrid intent detection (rules first, then an LLM returning JSON). Entities: ticket ID, asset ID, error codes, date, location
 - [ ] `data/nlu_labelled.json`: 20+ labelled messages, plus a script that measures accuracy
 - [ ] `src/state_tracker.py`: fields `user`, `intent`, `slots{asset_id, issue_type, location, date, time}`, `pending_confirmation`, `last_entities`, `turn`
