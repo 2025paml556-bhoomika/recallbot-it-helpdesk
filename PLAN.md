@@ -105,16 +105,16 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 - [ ] Store metadata with each chunk: `doc_id`, `section`, `version`, `valid_from`, `status`
 - [ ] `src/embedder.py`: MiniLM with mean pooling and normalised vectors; log every embedding call
 - [ ] `src/vector_index.py`: a flat FAISS index (justify it: a small corpus needs exact search), with metadata saved to `index/`
-- [ ] `src/bm25.py`: my own BM25 (k1, b, IDF)
-- [ ] `src/rrf.py`: my own RRF with k=60
-- [ ] `tests/test_bm25.py`: reproduce the CS4 example score of **4.160**
-- [ ] `tests/test_rrf.py`: reproduce the CS4 ranking A, B, C, D, then E and F tied
-- [ ] `src/search_kb.py`: dense, BM25 or hybrid search, chosen by a parameter
-- [ ] `src/eval_retrieval.py`: write `results/hit_rate.csv`
-  - [ ] Hit rate in the top 1, 3 and 5, for 3 methods × 2 chunk sizes
-  - [ ] Separate rows for code questions and reworded questions
-- [ ] Choose 1 question hybrid fixed and 1 it didn't, and save both ranked lists
-- [ ] `python -m pytest tests/` passes
+- [x] `src/bm25.py`: my own BM25 (k1, b, IDF)
+- [x] `src/rrf.py`: my own RRF with k=60
+- [x] `tests/test_bm25.py`: reproduce the CS4 example score of **4.160**
+- [x] `tests/test_rrf.py`: reproduce the CS4 ranking A, B, C, D, then E and F tied
+- [x] `src/search_kb.py`: dense, BM25 or hybrid search, chosen by a parameter
+- [x] `src/eval_retrieval.py`: write `results/hit_rate.csv`
+  - [x] Hit rate in the top 1, 3 and 5, for 3 methods × 2 chunk sizes
+  - [x] Separate rows for code questions and reworded questions
+- [x] Choose 1 question hybrid fixed and 1 it didn't, and save both ranked lists
+- [x] `python -m pytest tests/` passes
 
 **✅ Validate:** `pytest tests/test_bm25.py tests/test_rrf.py` passes (4.160 and A, B, C, D, then E and F tied); `grep` finds no `rank_bm25`, LangChain or LlamaIndex imports in `src/`; chunk overlap measures 10–20%; `results/hit_rate.csv` has 6 method × size rows plus the code and reworded rows, with hit rate never falling as the cut-off grows (top 1 ≤ top 3 ≤ top 5); `logs/calls.jsonl` contains embedding calls.
 

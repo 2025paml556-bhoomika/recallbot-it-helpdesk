@@ -1,0 +1,248 @@
+{
+  "cases": [
+    {
+      "label": "fixed",
+      "id": "Q20",
+      "question": "Is printing to a home printer supported while the VPN is connected?",
+      "gold_doc_id": "KB-PRINTERS",
+      "gold_version": "2026.1",
+      "chunk_size": 128,
+      "note": "Dense ranks a VPN chunk first and the printer document second. BM25, which can match 'printer', ranks the printer document first. Hybrid follows BM25, so the printer document moves up to first.",
+      "rankings": {
+        "dense": [
+          {
+            "rank": 1,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.64476,
+            "chunk_id": "KB-VPN@2026.1:128:4"
+          },
+          {
+            "rank": 2,
+            "doc_id": "KB-PRINTERS",
+            "version": "2026.1",
+            "score": 0.64262,
+            "chunk_id": "KB-PRINTERS@2026.1:128:1"
+          },
+          {
+            "rank": 3,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.46792,
+            "chunk_id": "KB-VPN@2026.1:128:3"
+          },
+          {
+            "rank": 4,
+            "doc_id": "KB-PRINTERS",
+            "version": "2026.1",
+            "score": 0.43291,
+            "chunk_id": "KB-PRINTERS@2026.1:128:2"
+          },
+          {
+            "rank": 5,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.38769,
+            "chunk_id": "KB-VPN@2026.1:128:0"
+          }
+        ],
+        "bm25": [
+          {
+            "rank": 1,
+            "doc_id": "KB-PRINTERS",
+            "version": "2026.1",
+            "score": 16.82593,
+            "chunk_id": "KB-PRINTERS@2026.1:128:1"
+          },
+          {
+            "rank": 2,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 6.36599,
+            "chunk_id": "KB-VPN@2026.1:128:3"
+          },
+          {
+            "rank": 3,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 5.13321,
+            "chunk_id": "KB-VPN@2026.1:128:4"
+          },
+          {
+            "rank": 4,
+            "doc_id": "KB-PRINTERS",
+            "version": "2026.1",
+            "score": 4.6795,
+            "chunk_id": "KB-PRINTERS@2026.1:128:0"
+          },
+          {
+            "rank": 5,
+            "doc_id": "KB-BACKUP",
+            "version": "2026.1",
+            "score": 4.54716,
+            "chunk_id": "KB-BACKUP@2026.1:128:0"
+          }
+        ],
+        "hybrid": [
+          {
+            "rank": 1,
+            "doc_id": "KB-PRINTERS",
+            "version": "2026.1",
+            "score": 0.03252,
+            "chunk_id": "KB-PRINTERS@2026.1:128:1"
+          },
+          {
+            "rank": 2,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.03227,
+            "chunk_id": "KB-VPN@2026.1:128:4"
+          },
+          {
+            "rank": 3,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.032,
+            "chunk_id": "KB-VPN@2026.1:128:3"
+          },
+          {
+            "rank": 4,
+            "doc_id": "KB-PRINTERS",
+            "version": "2026.1",
+            "score": 0.03055,
+            "chunk_id": "KB-PRINTERS@2026.1:128:0"
+          },
+          {
+            "rank": 5,
+            "doc_id": "KB-WIFI",
+            "version": "2026.1",
+            "score": 0.0303,
+            "chunk_id": "KB-WIFI@2026.1:128:2"
+          }
+        ]
+      }
+    },
+    {
+      "label": "not_fixed",
+      "id": "Q01",
+      "question": "What does ERR-VPN-809 mean?",
+      "gold_doc_id": "KB-VPN",
+      "gold_version": "2026.1",
+      "chunk_size": 512,
+      "note": "BM25 ranks the VPN document first. Dense ranks the outage note first, and that note also quotes ERR-VPN-809. Hybrid follows dense, so the VPN document is second rather than first.",
+      "rankings": {
+        "dense": [
+          {
+            "rank": 1,
+            "doc_id": "KB-OUTAGES",
+            "version": "2026.1",
+            "score": 0.52749,
+            "chunk_id": "KB-OUTAGES@2026.1:512:0"
+          },
+          {
+            "rank": 2,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.49016,
+            "chunk_id": "KB-VPN@2026.1:512:0"
+          },
+          {
+            "rank": 3,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.45397,
+            "chunk_id": "KB-VPN@2026.1:512:1"
+          },
+          {
+            "rank": 4,
+            "doc_id": "KB-ONBOARD",
+            "version": "2026.1",
+            "score": 0.32257,
+            "chunk_id": "KB-ONBOARD@2026.1:512:0"
+          },
+          {
+            "rank": 5,
+            "doc_id": "KB-OFFBOARD",
+            "version": "2026.1",
+            "score": 0.31264,
+            "chunk_id": "KB-OFFBOARD@2026.1:512:0"
+          }
+        ],
+        "bm25": [
+          {
+            "rank": 1,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 2.22892,
+            "chunk_id": "KB-VPN@2026.1:512:0"
+          },
+          {
+            "rank": 2,
+            "doc_id": "KB-OUTAGES",
+            "version": "2026.1",
+            "score": 1.97019,
+            "chunk_id": "KB-OUTAGES@2026.1:512:0"
+          },
+          {
+            "rank": 3,
+            "doc_id": "KB-WIFI",
+            "version": "2026.1",
+            "score": 1.07123,
+            "chunk_id": "KB-WIFI@2026.1:512:0"
+          },
+          {
+            "rank": 4,
+            "doc_id": "KB-BACKUP",
+            "version": "2026.1",
+            "score": 0.8087,
+            "chunk_id": "KB-BACKUP@2026.1:512:0"
+          },
+          {
+            "rank": 5,
+            "doc_id": "KB-SOFTWARE",
+            "version": "2026.1",
+            "score": 0.71369,
+            "chunk_id": "KB-SOFTWARE@2026.1:512:0"
+          }
+        ],
+        "hybrid": [
+          {
+            "rank": 1,
+            "doc_id": "KB-OUTAGES",
+            "version": "2026.1",
+            "score": 0.03252,
+            "chunk_id": "KB-OUTAGES@2026.1:512:0"
+          },
+          {
+            "rank": 2,
+            "doc_id": "KB-VPN",
+            "version": "2026.1",
+            "score": 0.03252,
+            "chunk_id": "KB-VPN@2026.1:512:0"
+          },
+          {
+            "rank": 3,
+            "doc_id": "KB-SOFTWARE",
+            "version": "2026.1",
+            "score": 0.03009,
+            "chunk_id": "KB-SOFTWARE@2026.1:512:0"
+          },
+          {
+            "rank": 4,
+            "doc_id": "KB-INCIDENT",
+            "version": "2026.1",
+            "score": 0.03008,
+            "chunk_id": "KB-INCIDENT@2026.1:512:0"
+          },
+          {
+            "rank": 5,
+            "doc_id": "KB-ONBOARD",
+            "version": "2026.1",
+            "score": 0.02951,
+            "chunk_id": "KB-ONBOARD@2026.1:512:0"
+          }
+        ]
+      }
+    }
+  ]
+}
