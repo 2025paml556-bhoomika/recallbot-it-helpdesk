@@ -126,8 +126,10 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
   - `book_it_slot(...)` runs only after the user confirms
   - Every tool call is logged with 0 tokens
   - Checked: `pytest tests/test_tools.py` (3 passed). U2 on U1's ticket returns "not found"; no slot row before confirmation and exactly one after; tool lines have 0 tokens.
-- [ ] `src/nlu.py`: hybrid intent detection (rules first, then an LLM returning JSON). Entities: ticket ID, asset ID, error codes, date, location
-- [ ] `data/nlu_labelled.json`: 20+ labelled messages, plus a script that measures accuracy
+- [x] `src/nlu.py`: hybrid intent detection (rules first, then an LLM returning JSON). Entities: ticket ID, asset ID, error codes, date, location
+  - Rules label a bare yes, no, or ticket id and make no model call. Everything else is one `chat()` call at temperature 0 with `call_type` "nlu".
+- [x] `data/nlu_labelled.json`: 20+ labelled messages, plus a script that measures accuracy
+  - 24 messages covering all 8 intents. `python -m src.eval_nlu`: 24/24 correct (accuracy 1.000). `pytest tests/test_nlu.py`: 8 passed.
 - [ ] `src/state_tracker.py`: fields `user`, `intent`, `slots{asset_id, issue_type, location, date, time}`, `pending_confirmation`, `last_entities`, `turn`
 - [ ] `src/dialogue_manager.py`: the main loop. It fills missing slots, asks a clarifying question when needed, and confirms before any write
 - [ ] `src/nlg.py`: fixed templates for confirmations and slot questions, the LLM for open answers

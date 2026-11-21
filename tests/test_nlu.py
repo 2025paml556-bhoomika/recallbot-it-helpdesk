@@ -1,0 +1,104 @@
+"""NLU checks: rules fire without a model call, the LLM path returns JSON.
+
+The live tests talk to the local Ollama model and are marked `live`.
+The accuracy figure over all 20+ labels is `python -m src.eval_nlu`, which
+is too slow to run on every pytest invocation.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from src.config import LOG_PATH
+from src.eval_nlu import load_labels, slots_match
+from src.nlu import INTENTS, SLOT_NAMES, NLUError, understand
+
+
+def _log_len() -> int:
+    if not LOG_PATH.exists():
+        return 0
+    return len(LOG_PATH.read_text(encoding="utf-8").splitlines())
+
+
+def test_labelled_file_has_20_plus_messages_covering_every_intent():
+    labels = load_labels()
+    assert len(labels) >= 20
+    seen = {item["intent"] for item in labels}
+    assert seen == set(INTENTS)
+    for item in labels:
+        assert item["text"].strip()
+        assert set(item["slots"]) <= set(SLOT_NAMES)
+
+
+def test_rules_label_yes_no_and_a_bare_ticket_without_logging():
+    before = _log_len()
+
+    yes = understand("yes")
+    assert yes["intent"] == "confirm"
+    assert yes["source"] == "rule"
+    assert all(value is None for value in yes["slots"].values())
+
+    no = understand("no")
+    assert no["intent"] == "reject"
+    assert no["source"] == "rule"
+
+    ticket = understand("TCK-1001")
+    assert ticket["intent"] == "check_ticket"
+    assert ticket["source"] == "rule"
+    assert ticket["slots"]["ticket_id"] == "TCK-1001"
+
+    assert _log_len() == before
+
+
+def test_slots_match_ignores_slots_the_label_does_not_mention():
+    expected = {"error_code": "ERR-VPN-809"}
+    assert slots_match({"error_code": "ERR-VPN-809", "issue_type": "VPN"}, expected)
+    assert not slots_match({"error_code": "ERR-VPN-104"}, expected)
+    assert not slots_match({}, expected)
+
+
+def test_understand_rejects_an_unknown_intent(monkeypatch):
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: '{"intent": "chat", "slots": {}}')
+    with pytest.raises(NLUError, match="unknown intent"):
+        understand("What does ERR-VPN-809 mean?")
+
+
+def test_understand_rejects_a_reply_that_is_not_json(monkeypatch):
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: "I think this is a VPN question.")
+    with pytest.raises(NLUError):
+        understand("What does ERR-VPN-809 mean?")
+
+
+def test_a_known_code_is_copied_when_the_model_leaves_it_null(monkeypatch):
+    payload = json.dumps({"intent": "ask_kb", "slots": {"error_code": None}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("What does ERR-VPN-809 mean?")
+    assert result["intent"] == "ask_kb"
+    assert result["slots"]["error_code"] == "ERR-VPN-809"
+    assert result["slots"]["location"] is None
+    assert set(result["slots"]) == set(SLOT_NAMES)
+
+
+@pytest.mark.live
+def test_live_vpn_question_is_ask_kb_with_the_code():
+    result = understand(
+        "The VPN keeps failing with ERR-VPN-809. What does that code mean?",
+        user="U1",
+        turn=9,
+    )
+    assert result["intent"] == "ask_kb"
+    assert result["source"] == "llm"
+    assert result["slots"]["error_code"] == "ERR-VPN-809"
+    assert result["slots"]["date"] is None
+    assert result["slots"]["time"] is None
+
+
+@pytest.mark.live
+def test_live_same_sentence_twice_gives_the_same_intent():
+    text = "How long does a guest Wi-Fi pass last?"
+    first = understand(text)
+    second = understand(text)
+    assert first["intent"] == second["intent"] == "ask_kb"
+    assert first["slots"] == second["slots"]

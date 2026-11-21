@@ -1,0 +1,149 @@
+{
+  "description": "Labelled helpdesk messages for the NLU accuracy check. Each item is one user sentence with the intent and the slots a correct labelling must contain. A slot omitted here must come back null.",
+  "labels": [
+    {
+      "id": "N01",
+      "text": "The VPN keeps failing with ERR-VPN-809. What does that code mean?",
+      "intent": "ask_kb",
+      "slots": {"error_code": "ERR-VPN-809"}
+    },
+    {
+      "id": "N02",
+      "text": "It's been doing this all week and it's blocking the month-end close. I'd like it raised as a ticket.",
+      "intent": "fix_issue",
+      "slots": {}
+    },
+    {
+      "id": "N03",
+      "text": "Can someone from the desk come to my desk and look at it?",
+      "intent": "book_slot",
+      "slots": {}
+    },
+    {
+      "id": "N04",
+      "text": "The Pune office.",
+      "intent": "book_slot",
+      "slots": {"location": "Pune office"}
+    },
+    {
+      "id": "N05",
+      "text": "Third floor, desk 14.",
+      "intent": "book_slot",
+      "slots": {"location": "3rd floor, desk 14"}
+    },
+    {
+      "id": "N06",
+      "text": "Thursday, please.",
+      "intent": "book_slot",
+      "slots": {"date": "Thursday"}
+    },
+    {
+      "id": "N07",
+      "text": "Make it Thursday at 4 pm.",
+      "intent": "book_slot",
+      "slots": {"date": "Thursday", "time": "4 pm"}
+    },
+    {
+      "id": "N08",
+      "text": "Yes, go ahead and book that.",
+      "intent": "confirm",
+      "slots": {}
+    },
+    {
+      "id": "N09",
+      "text": "No, leave Friday. Thursday alone is enough.",
+      "intent": "reject",
+      "slots": {}
+    },
+    {
+      "id": "N10",
+      "text": "How long is the laptop refresh cycle now, and which model would I get?",
+      "intent": "ask_kb",
+      "slots": {}
+    },
+    {
+      "id": "N11",
+      "text": "What does SLA-P1 promise for a first response?",
+      "intent": "ask_kb",
+      "slots": {}
+    },
+    {
+      "id": "N12",
+      "text": "How long does a guest Wi-Fi pass last?",
+      "intent": "ask_kb",
+      "slots": {}
+    },
+    {
+      "id": "N13",
+      "text": "Is there a way to print to my home printer while the VPN is connected?",
+      "intent": "ask_kb",
+      "slots": {}
+    },
+    {
+      "id": "N14",
+      "text": "Hi, I'm Meera Iyer, employee E-10428. My laptop runs Windows 11.",
+      "intent": "provide_info",
+      "slots": {}
+    },
+    {
+      "id": "N15",
+      "text": "It's a LAP-T14G3, the older 14 inch model.",
+      "intent": "provide_info",
+      "slots": {"asset_id": "LAP-T14G3"}
+    },
+    {
+      "id": "N16",
+      "text": "I sit at the Pune office, on the third floor.",
+      "intent": "provide_info",
+      "slots": {"location": "Pune office, 3rd floor"}
+    },
+    {
+      "id": "N17",
+      "text": "Lovely weather today, isn't it?",
+      "intent": "out_of_scope",
+      "slots": {}
+    },
+    {
+      "id": "N18",
+      "text": "Hope your day is going well!",
+      "intent": "out_of_scope",
+      "slots": {}
+    },
+    {
+      "id": "N19",
+      "text": "What is the status of ticket TCK-1001?",
+      "intent": "check_ticket",
+      "slots": {"ticket_id": "TCK-1001"}
+    },
+    {
+      "id": "N20",
+      "text": "My printer shows ERR-PRINT-017 and nothing comes out. Please fix it.",
+      "intent": "fix_issue",
+      "slots": {"error_code": "ERR-PRINT-017"}
+    },
+    {
+      "id": "N21",
+      "text": "yes",
+      "intent": "confirm",
+      "slots": {}
+    },
+    {
+      "id": "N22",
+      "text": "no",
+      "intent": "reject",
+      "slots": {}
+    },
+    {
+      "id": "N23",
+      "text": "TCK-1001",
+      "intent": "check_ticket",
+      "slots": {"ticket_id": "TCK-1001"}
+    },
+    {
+      "id": "N24",
+      "text": "Thanks, that's all for today.",
+      "intent": "out_of_scope",
+      "slots": {}
+    }
+  ]
+}
