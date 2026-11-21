@@ -39,6 +39,10 @@ LOG_PATH = LOG_DIR / "calls.jsonl"
 CHUNKS_PATH = ROOT / "data" / "chunks.jsonl"
 INDEX_DIR = ROOT / "index"
 
+# Helpdesk database (Step 5). Recreated by `python -m src.db`.
+DB_DIR = ROOT / "db"
+DB_PATH = DB_DIR / "helpdesk.sqlite"
+
 # Folders Step 1 must create. Kept here so the check and the README agree.
 REQUIRED_DIRS = (
     ROOT / "src",
