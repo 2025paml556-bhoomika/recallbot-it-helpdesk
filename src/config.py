@@ -43,6 +43,37 @@ INDEX_DIR = ROOT / "index"
 DB_DIR = ROOT / "db"
 DB_PATH = DB_DIR / "helpdesk.sqlite"
 
+# Long-term memory (Steps 7 and 8). One JSONL stream each, shared by every
+# user; every read filters on the user column. The vectors sit beside the
+# stream so a forget can drop the row and its vector together.
+MEMORY_DIR = ROOT / "memory"
+SEMANTIC_PATH = MEMORY_DIR / "semantic.jsonl"
+SEMANTIC_INDEX_PATH = MEMORY_DIR / "semantic.faiss"
+SEMANTIC_IDS_PATH = MEMORY_DIR / "semantic_ids.json"
+EPISODIC_PATH = MEMORY_DIR / "episodic.jsonl"
+EPISODIC_INDEX_PATH = MEMORY_DIR / "episodic.faiss"
+EPISODIC_IDS_PATH = MEMORY_DIR / "episodic_ids.json"
+
+# Working memory is one file per session, thrown away when the session ends.
+WORKING_DIR = MEMORY_DIR / "working"
+
+# How many past episodes a turn may load. The rest stay on disk.
+EPISODIC_TOP_K = 3
+# Cosine below this is not relevant. A user with no related history gets
+# nothing back, not their least-unrelated episode.
+MEMORY_RELEVANCE = 0.30
+
+# Episodic score = ALPHA * recency + BETA * importance + GAMMA * cosine.
+# Recency is exponential decay per hour. Importance is stored 1-10 and
+# scaled to 0-1 before it is added, so the three terms share a scale.
+EPISODIC_ALPHA = 1.0
+EPISODIC_BETA = 1.0
+EPISODIC_GAMMA = 1.0
+EPISODIC_DECAY = 0.995
+
+# The rolling summary is capped so it cannot crowd the retrieved passage.
+WORKING_SUMMARY_TOKENS = 150
+
 # Folders Step 1 must create. Kept here so the check and the README agree.
 REQUIRED_DIRS = (
     ROOT / "src",

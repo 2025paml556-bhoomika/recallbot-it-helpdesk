@@ -43,6 +43,7 @@ def embed(
     user: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    log: bool = True,
 ) -> np.ndarray:
     """Return one normalised vector per text, shape (len(texts), EMBED_DIM).
 
@@ -53,7 +54,9 @@ def embed(
         return np.zeros((0, EMBED_DIM), dtype=np.float32)
 
     model = load_model()
-    input_tokens = count_tokens(texts)
+    # Token counting loads the tokenizer, so it is skipped when the caller
+    # has asked for no log line. There is nothing to count for.
+    input_tokens = count_tokens(texts) if log else 0
     start = time.time()
     # normalize_embeddings does the L2 normalisation. The model's default
     # pooling is mean pooling, which is what all-MiniLM-L6-v2 was trained with.
@@ -66,7 +69,11 @@ def embed(
     )
     vectors = np.asarray(vectors, dtype=np.float32)
 
-    # Log only after the call succeeds, so a failure leaves no line.
+    # Log only after the call succeeds, so a failure leaves no line. A caller
+    # that is re-embedding stored memory passes log=False: that work was
+    # already logged when the vector was first computed.
+    if not log:
+        return vectors
     log_call(
         call_type="embedding",
         model=EMBED_MODEL,
