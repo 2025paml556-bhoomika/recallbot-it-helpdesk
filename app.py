@@ -1,8 +1,9 @@
-"""Small command line front for the knowledge base chunker.
+"""Small command line front for the knowledge base tools.
 
-    .venv/bin/python app.py                 # chunk every document
-    .venv/bin/python app.py sla.md          # chunk one document and print it
-    .venv/bin/python app.py sla.md --size 128
+    .venv/bin/python app.py chunk                 # chunk every document
+    .venv/bin/python app.py chunk sla.md          # chunk one document and print it
+    .venv/bin/python app.py chunk sla.md --size 128
+    .venv/bin/python app.py embed                 # embed three strings and print the shape
 """
 
 from __future__ import annotations
@@ -40,20 +41,52 @@ def chunk_one(name: str, sizes: tuple[int, ...]) -> int:
     return 0
 
 
+def embed_check() -> int:
+    """Embed three strings and show that the vectors are 384-d and unit length."""
+    import numpy as np
+
+    from src.config import EMBED_DIM
+    from src.embedder import embed
+
+    samples = [
+        "The VPN drops with error ERR-VPN-809.",
+        "How do I reset my laptop password?",
+        "A priority one incident has a one hour response.",
+    ]
+    vectors = embed(samples)
+    norms = np.linalg.norm(vectors, axis=1)
+    print(f"shape: {vectors.shape}")
+    print(f"norms: {np.round(norms, 6).tolist()}")
+    if vectors.shape != (len(samples), EMBED_DIM):
+        print(f"expected shape {(len(samples), EMBED_DIM)}", file=sys.stderr)
+        return 1
+    if not np.allclose(norms, 1.0, atol=1e-4):
+        print("vectors are not unit length", file=sys.stderr)
+        return 1
+    return 0
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Chunk the knowledge base.")
-    parser.add_argument("document", nargs="?", help="one file in data/kb, e.g. sla.md")
-    parser.add_argument(
+    parser = argparse.ArgumentParser(description="Knowledge base chunking and embedding.")
+    subparsers = parser.add_subparsers(dest="mode", required=True)
+
+    chunk_parser = subparsers.add_parser("chunk", help="split the knowledge base into chunks")
+    chunk_parser.add_argument("document", nargs="?", help="one file in data/kb, e.g. sla.md")
+    chunk_parser.add_argument(
         "--size",
         type=int,
         choices=CHUNK_SIZES,
         help="chunk size to use (default: both)",
     )
+
+    subparsers.add_parser("embed", help="embed three strings and print the shape")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.mode == "embed":
+        sys.exit(embed_check())
     sizes = (args.size,) if args.size else CHUNK_SIZES
     if args.document:
         sys.exit(chunk_one(args.document, sizes))
