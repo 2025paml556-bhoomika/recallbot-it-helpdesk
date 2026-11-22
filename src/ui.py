@@ -61,14 +61,21 @@ def _clean(value):
 
 
 def snapshot(user: str) -> dict:
-    """What is on disk right now, for the side panels."""
-    semantic = _read_jsonl(SEMANTIC_PATH)
-    episodic = [_clean(row) for row in _read_jsonl(EPISODIC_PATH)]
+    """What is on disk for this user, for the side panels.
+
+    The files hold every user. The page is showing one of them, so a row
+    that belongs to anyone else is left out. Switching user reloads this.
+    """
+    who = user.strip() or "U1"
+    semantic = [row for row in _read_jsonl(SEMANTIC_PATH) if row.get("user") == who]
+    episodic = [
+        _clean(row) for row in _read_jsonl(EPISODIC_PATH) if row.get("user") == who
+    ]
     return {
         "facts": semantic,
         "episodes": episodic,
-        "tickets": _table("tickets"),
-        "bookings": _table("slots"),
+        "tickets": [row for row in _table("tickets") if row.get("owner_user") == who],
+        "bookings": [row for row in _table("slots") if row.get("owner_user") == who],
     }
 
 
@@ -128,6 +135,29 @@ def forget(user: str, session: str, value: str) -> dict:
     return {"removed": removed, "state": snapshot(user)}
 
 
+def clear_user(user: str, session: str) -> dict:
+    """Wipe this user and drop every live session of theirs.
+
+    The page button is per user, not per tab. Facts, episodes, transcripts,
+    tickets and bookings go. The other user is left as they are. The live
+    Session objects go too, so the next message starts with empty slots.
+    """
+    who = user.strip() or "U1"
+    current = get_session(who, session)
+    removed = current.memory.clear_user()
+    conn = connect(DB_PATH)
+    try:
+        for table in ("tickets", "slots", "assets"):
+            conn.execute(f"DELETE FROM {table} WHERE owner_user = ?", (who,))
+        conn.commit()
+    finally:
+        conn.close()
+    with _lock:
+        for key in [key for key in _sessions if key[0] == who]:
+            _sessions.pop(key, None)
+    return {"removed": removed, "state": snapshot(who)}
+
+
 def close_session(user: str, session: str, reflection: str) -> dict:
     current = get_session(user, session)
     written = current.end(reflection.strip() or f"{user} ended session {session}.")
@@ -173,6 +203,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/reset":
                 drop_session(user, session)
                 self._send_json({"ok": True, "state": snapshot(user)})
+            elif path == "/api/clear":
+                self._send_json(clear_user(user, session))
             else:
                 self._send(404, b"not found", "text/plain")
         except Exception as exc:  # shown in the page rather than as a stack trace
@@ -237,6 +269,7 @@ PAGE = """<!DOCTYPE html>
   button { font: 14px sans-serif; background: #231f1a; color: #f4f1ea; border: 0;
            border-radius: 6px; padding: 8px 14px; cursor: pointer; }
   button.ghost { background: transparent; color: #231f1a; border: 1px solid #c9bfb0; }
+  header button.ghost { color: #f4f1ea; border-color: #5b5348; padding: 4px 10px; }
   .row { display: flex; gap: 8px; margin-top: 8px; }
   .row input { flex: 1; font: 14px sans-serif; padding: 6px 8px;
                border: 1px solid #d9d0c3; border-radius: 6px; }
@@ -256,6 +289,7 @@ PAGE = """<!DOCTYPE html>
   <label>User
     <select id="user"><option>U1</option><option>U2</option></select>
   </label>
+  <button type="button" class="ghost" id="do-clear">Clear this user</button>
   <span id="session-label"></span>
   <span style="font:12px sans-serif;color:#9a9084">Each tab is its own session. Facts in memory/ carry over; this tab's slots do not.</span>
 </header>
@@ -416,6 +450,31 @@ $("do-end").addEventListener("click", async () => {
   note("Session closed. Reflection " + data.reflection.id + ": " + data.reflection.text);
   renderState(data.state);
   $("reflection").value = "";
+});
+
+function freshSession() {
+  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+  const rand = Math.random().toString(36).slice(2, 6);
+  sessionId = "S-" + stamp + "-" + rand;
+  sessionStorage.setItem("recallbot-session", sessionId);
+  $("session-label").textContent = "Session " + sessionId;
+  log.innerHTML = "";
+  $("recalled").className = "empty";
+  $("recalled").textContent = "Nothing recalled yet.";
+}
+
+$("do-clear").addEventListener("click", async () => {
+  const name = $("user").value;
+  if (!confirm("Clear everything stored for " + name + "? The other user is kept.")) return;
+  try {
+    const data = await post("/api/clear", {});
+    freshSession();
+    renderState(data.state);
+    note("Cleared " + name + ": " + data.removed.facts + " fact(s), " +
+      data.removed.episodes + " episode(s), " + data.removed.sessions + " conversation(s).");
+  } catch (err) {
+    note('<span class="error">' + err.message + "</span>");
+  }
 });
 
 $("user").addEventListener("change", async () => {

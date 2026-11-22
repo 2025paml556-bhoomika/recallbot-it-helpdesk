@@ -356,7 +356,12 @@ def test_check_ticket_returns_only_the_owners_row(monkeypatch, tmp_path):
             {
                 "Please raise the VPN failure.": {
                     "intent": "fix_issue",
-                    "slots": {"issue_type": "VPN failure"},
+                    "slots": {
+                        "issue_type": "VPN failure",
+                        "location": "Pune office",
+                        "date": "Thursday",
+                        "time": "4 pm",
+                    },
                 },
             }
         ),
@@ -364,7 +369,9 @@ def test_check_ticket_returns_only_the_owners_row(monkeypatch, tmp_path):
     db_path = tmp_path / "helpdesk.sqlite"
     owner = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
     owner.ingest("Please raise the VPN failure.")
-    raised = owner.decide("Please raise the VPN failure.")
+    owner.decide("Please raise the VPN failure.")
+    owner.ingest("yes")
+    raised = owner.decide("yes")
     ticket_id = raised["result"]["ticket_id"]
 
     other = Session("U2", "B", db_path=db_path, memory=Memory("U2", "B", root=tmp_path))
@@ -381,7 +388,7 @@ def test_check_ticket_returns_only_the_owners_row(monkeypatch, tmp_path):
     assert _log_len() == before
 
 
-def test_fix_issue_raises_one_ticket_and_remembers_its_id(monkeypatch, tmp_path):
+def test_fix_issue_asks_for_the_visit_before_raising_a_ticket(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",
         _scripted(
@@ -390,34 +397,58 @@ def test_fix_issue_raises_one_ticket_and_remembers_its_id(monkeypatch, tmp_path)
                     "intent": "fix_issue",
                     "slots": {"issue_type": "VPN failure ERR-VPN-809"},
                 },
+                "The Pune office.": {"intent": "book_slot", "slots": {"location": "Pune office"}},
+                "Thursday, please.": {"intent": "book_slot", "slots": {"date": "Thursday"}},
+                "4 pm.": {"intent": "book_slot", "slots": {"time": "4 pm"}},
             }
         ),
     )
     db_path = tmp_path / "helpdesk.sqlite"
     before = _log_len()
     session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
+
     text = "Please raise the VPN failure."
     session.ingest(text)
     decision = session.decide(text)
+    assert decision == {
+        "action": ACTION_ASK,
+        "slot": "location",
+        "prompt": BOOKING_ASKS["location"],
+    }
+    assert session.pending_booking is True
+    assert session.slots["ticket_id"] is None
+    assert _rows(db_path, "tickets") == []
+    assert _log_len() == before
 
-    assert decision["action"] == ACTION_TOOL
-    assert decision["name"] == "raise_ticket"
-    ticket = decision["result"]
-    assert ticket["owner_user"] == "U1"
-    assert ticket["issue_type"] == "VPN failure ERR-VPN-809"
-    assert ticket["status"] == "open"
-    assert session.slots["ticket_id"] == ticket["ticket_id"]
-
-    rows = _rows(db_path, "tickets")
-    assert len(rows) == 1
-    assert rows[0]["ticket_id"] == ticket["ticket_id"]
+    session.ingest("The Pune office.")
+    assert session.decide("The Pune office.")["slot"] == "date"
+    session.ingest("Thursday, please.")
+    assert session.decide("Thursday, please.")["slot"] == "time"
+    session.ingest("4 pm.")
+    confirm = session.decide("4 pm.")
+    assert confirm == {"action": ACTION_ASK, "slot": None, "prompt": CONFIRM_BOOKING}
+    assert _rows(db_path, "tickets") == []
     assert _rows(db_path, "slots") == []
 
+    session.ingest("yes")
+    booked = session.decide("yes")
+    assert booked["action"] == ACTION_TOOL
+    assert booked["name"] == "book_it_slot"
+    assert booked["result"]["location"] == "Pune office"
+    assert booked["result"]["date"] == "Thursday"
+    assert booked["result"]["time"] == "4 pm"
+    assert booked["result"]["ticket_id"] == session.slots["ticket_id"]
+
+    tickets = _rows(db_path, "tickets")
+    assert len(tickets) == 1
+    assert tickets[0]["ticket_id"] == session.slots["ticket_id"]
+    assert tickets[0]["owner_user"] == "U1"
+    assert tickets[0]["issue_type"] == "VPN failure ERR-VPN-809"
+    assert tickets[0]["status"] == "open"
+    assert len(_rows(db_path, "slots")) == 1
+
     added = _tool_lines(_log_lines()[before:])
-    assert len(added) == 1
-    assert added[0]["tool"] == "raise_ticket"
-    assert added[0]["input_tokens"] == 0
-    assert added[0]["output_tokens"] == 0
+    assert [row["tool"] for row in added] == ["raise_ticket", "book_it_slot"]
 
 
 def test_the_same_fault_is_not_raised_twice(monkeypatch, tmp_path):
@@ -427,7 +458,12 @@ def test_the_same_fault_is_not_raised_twice(monkeypatch, tmp_path):
             {
                 "Please raise the VPN failure.": {
                     "intent": "fix_issue",
-                    "slots": {"issue_type": "VPN failure"},
+                    "slots": {
+                        "issue_type": "VPN failure",
+                        "location": "Pune office",
+                        "date": "Thursday",
+                        "time": "4 pm",
+                    },
                 },
             }
         ),
@@ -436,7 +472,11 @@ def test_the_same_fault_is_not_raised_twice(monkeypatch, tmp_path):
     session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
     text = "Please raise the VPN failure."
     session.ingest(text)
-    session.decide(text)
+    asked = session.decide(text)
+    assert asked["prompt"] == CONFIRM_BOOKING
+    session.ingest("yes")
+    session.decide("yes")
+    assert len(_rows(db_path, "tickets")) == 1
 
     before = _log_len()
     session.ingest(text)
@@ -614,6 +654,36 @@ def test_no_drops_the_booking_and_writes_nothing(monkeypatch, tmp_path):
     assert _log_len() == before
 
 
+def test_a_fix_issue_answer_labelled_provide_info_still_asks_for_the_day(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "My downloads are slow on laptop, what to do?": {
+                    "intent": "fix_issue",
+                    "slots": {"issue_type": "slow downloads", "asset_id": "laptop"},
+                },
+                "Pune office, floor 2 and desk 14.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Pune office, floor 2, desk 14"},
+                },
+            }
+        ),
+    )
+    session = Session("U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("My downloads are slow on laptop, what to do?")
+    asked = session.decide("My downloads are slow on laptop, what to do?")
+    assert asked["slot"] == "location"
+
+    session.ingest("Pune office, floor 2 and desk 14.")
+    nxt = session.decide("Pune office, floor 2 and desk 14.")
+    assert nxt == {"action": ACTION_ASK, "slot": "date", "prompt": BOOKING_ASKS["date"]}
+    assert session.pending_booking is True
+    assert session.pending_ticket is True
+    assert session.slots["location"] == "Pune office, floor 2, desk 14"
+    assert _rows(tmp_path / "helpdesk.sqlite", "tickets") == []
+
+
 def test_provide_info_and_a_greeting_call_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",
@@ -687,7 +757,12 @@ def test_a_tool_result_is_phrased_by_one_model_call(monkeypatch, tmp_path):
             {
                 "Please raise the VPN failure.": {
                     "intent": "fix_issue",
-                    "slots": {"issue_type": "VPN failure"},
+                    "slots": {
+                        "issue_type": "VPN failure",
+                        "location": "Pune office",
+                        "date": "Thursday",
+                        "time": "4 pm",
+                    },
                 },
             }
         ),
@@ -704,18 +779,23 @@ def test_a_tool_result_is_phrased_by_one_model_call(monkeypatch, tmp_path):
     session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
     text = "Please raise the VPN failure."
     session.ingest(text)
-    decision = session.decide(text)
-    said = session.reply(text, decision)
+    asked = session.decide(text)
+    assert asked["action"] == ACTION_ASK
+    session.ingest("yes")
+    decision = session.decide("yes")
+    said = session.reply("yes", decision)
 
     assert said == "I've raised TCK-0001 for the VPN failure."
     assert seen["temperature"] == 0.0
     assert seen["call_type"] == "reply"
     assert seen["user"] == "U1"
     assert seen["session"] == "A"
-    assert seen["turn"] == 1
+    assert seen["turn"] == 2
     # The model is shown the row the tool actually wrote, not the user's words alone.
-    assert decision["result"]["ticket_id"] in seen["prompt"]
-    assert "VPN failure" in seen["prompt"]
+    assert "Booked slot" in seen["prompt"]
+    assert "Pune office" in seen["prompt"]
+    assert "Thursday" in seen["prompt"]
+    assert decision["result"]["ticket_id"]
 
 
 def test_a_search_with_nothing_relevant_is_not_handed_a_passage(monkeypatch, tmp_path):
@@ -778,13 +858,15 @@ def test_a_ticket_that_is_not_the_users_is_phrased_as_not_found(monkeypatch, tmp
     monkeypatch.setattr(
         "src.agent.understand",
         _scripted(
-            {"Please raise the VPN failure.": {"intent": "fix_issue", "slots": {"issue_type": "VPN"}}}
+            {"Please raise the VPN failure.": {"intent": "fix_issue", "slots": {"issue_type": "VPN", "location": "Pune office", "date": "Thursday", "time": "4 pm"}}}
         ),
     )
     db_path = tmp_path / "helpdesk.sqlite"
     owner = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
     owner.ingest("Please raise the VPN failure.")
-    ticket_id = owner.decide("Please raise the VPN failure.")["result"]["ticket_id"]
+    owner.decide("Please raise the VPN failure.")
+    owner.ingest("yes")
+    ticket_id = owner.decide("yes")["result"]["ticket_id"]
 
     seen = {}
 
@@ -1000,6 +1082,84 @@ def test_ingest_passes_user_session_and_turn_to_nlu(monkeypatch, tmp_path):
     session.ingest("Hello.")
     session.ingest("Thanks.")
 
-    assert seen == {"user": "U1", "session": "A", "turn": 2}
+    assert seen["user"] == "U1"
+    assert seen["session"] == "A"
+    assert seen["turn"] == 2
+    # The same list the session file is filled from, so the labelling call
+    # can be recorded beside the reply.
+    assert seen["trace"] is session.calls
     assert [item["turn"] for item in session.history] == [1, 2]
     assert json.loads(json.dumps(session.history))[1]["text"] == "Thanks."
+
+def test_a_reply_is_appended_to_that_sessions_json_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Hello.": {"intent": "out_of_scope"}}),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    session = Session("U1", "S-1", memory=Memory("U1", "S-1", root=tmp_path))
+    text = "Hello."
+    session.ingest(text)
+    said = session.reply(text, session.decide(text))
+
+    saved = json.loads(session.memory.conversation.path.read_text(encoding="utf-8"))
+    assert saved["user"] == "U1"
+    assert saved["session"] == "S-1"
+    assert saved["turns"] == [
+        {"turn": 1, "user": text, "bot": said, "intent": "out_of_scope", "calls": []}
+    ]
+
+    other = Session("U1", "S-2", memory=Memory("U1", "S-2", root=tmp_path))
+    other.ingest(text)
+    other.reply(text, other.decide(text))
+    assert session.memory.conversation.path != other.memory.conversation.path
+    # Ending the session keeps the transcript. Only the working summary goes.
+    session.end("Nothing to keep.")
+    assert session.memory.conversation.path.exists()
+
+
+def test_a_tool_turn_logs_the_prompts_and_the_tool_call(monkeypatch, tmp_path):
+    from src.llm import ChatResult
+
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"What does ERR-VPN-809 mean?": {"intent": "ask_kb"}}),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+    monkeypatch.setattr(
+        "src.agent.search_kb",
+        lambda query, **kwargs: [{"doc_id": "vpn.md", "text": "ERR-VPN-809 means the tunnel dropped.", "mode": "hybrid", "score": 1.0}],
+    )
+
+    def fake_chat(prompt, **kwargs):
+        result = ChatResult(
+            "ERR-VPN-809 means the tunnel dropped, from vpn.md.",
+            system=kwargs.get("system"),
+            user=prompt,
+            call_type=kwargs.get("call_type", "reply"),
+            model="stub",
+        )
+        trace = kwargs.get("trace")
+        if trace is not None:
+            trace.append(result.trace())
+        return result
+
+    monkeypatch.setattr("src.agent.chat", fake_chat)
+    session = Session("U1", "S-9", memory=Memory("U1", "S-9", root=tmp_path))
+    text = "What does ERR-VPN-809 mean?"
+    session.ingest(text)
+    said = session.reply(text, session.decide(text))
+
+    saved = json.loads(session.memory.conversation.path.read_text(encoding="utf-8"))
+    turn = saved["turns"][0]
+    assert turn["bot"] == said
+    assert turn["tool"]["name"] == "search_kb"
+    assert turn["tool"]["arguments"]["query"] == text
+    assert "ERR-VPN-809" in turn["tool"]["result"][0]["text"]
+    roles = [message["role"] for message in turn["calls"][0]["messages"]]
+    assert roles == ["system", "user", "assistant"]
+    assert "Tool result" in turn["calls"][0]["messages"][1]["content"]
+    assert turn["calls"][0]["messages"][2]["content"] == said

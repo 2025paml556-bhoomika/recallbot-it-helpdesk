@@ -22,6 +22,44 @@ class LLMError(RuntimeError):
     """Raised when the chat backend rejects or cannot complete a call."""
 
 
+class ChatResult(str):
+    """The assistant text, plus the prompts that produced it.
+
+    It is a str, so `reply.strip()` and f-strings keep working. system is
+    the system prompt (None when the call sent none), user is the user
+    prompt, and call_type says which step this was (nlu, reply, summarise).
+    """
+
+    def __new__(
+        cls,
+        text: str,
+        *,
+        system: str | None,
+        user: str,
+        call_type: str,
+        model: str,
+    ):
+        obj = str.__new__(cls, text)
+        obj.system = system
+        obj.user = user
+        obj.call_type = call_type
+        obj.model = model
+        return obj
+
+    def trace(self) -> dict:
+        """One model call, in the order the messages were sent."""
+        messages = []
+        if self.system:
+            messages.append({"role": "system", "content": self.system})
+        messages.append({"role": "user", "content": self.user})
+        messages.append({"role": "assistant", "content": str(self)})
+        return {
+            "call_type": self.call_type,
+            "model": self.model,
+            "messages": messages,
+        }
+
+
 def chat(
     prompt: str,
     *,
@@ -36,8 +74,13 @@ def chat(
     turn: int | None = None,
     retrieved_tokens: int = 0,
     timeout: float = 120.0,
+    trace: list | None = None,
 ) -> str:
     """Send one chat turn and return the assistant text.
+
+    The return value is a str, so callers can treat it as text. It also
+    carries the system prompt and the user prompt that were sent, on
+    .system and .user, for the conversation log.
 
     Logs exactly one line after a successful response. On any HTTP, network
     or payload error, raises LLMError and leaves the log unchanged.
@@ -106,4 +149,10 @@ def chat(
             },
         },
     )
-    return reply
+    # The transcript wants the prompts that were actually sent, not a second
+    # copy assembled by the caller. trace is that record. The reply text is
+    # still `text`, so every existing caller keeps working.
+    result = ChatResult(reply, system=system, user=prompt, call_type=call_type, model=model_name)
+    if trace is not None:
+        trace.append(result.trace())
+    return result

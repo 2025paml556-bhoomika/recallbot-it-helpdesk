@@ -239,3 +239,79 @@ def test_ending_a_session_deletes_the_working_summary(monkeypatch, tmp_path):
     assert "VPN" in text
     assert not notes.path.exists()
     assert notes.summary == ""
+
+def test_each_session_is_its_own_conversation_file(tmp_path):
+    from src.memory import ConversationLog, _session_filename
+
+    first = ConversationLog("U1", "S-1", root=tmp_path)
+    first.append(
+        "I sit at the Pune office.",
+        "Thanks, I'll keep that in mind.",
+        turn=1,
+        intent="provide_info",
+        calls=[{
+            "call_type": "nlu",
+            "model": "qwen2.5:3b",
+            "messages": [
+                {"role": "system", "content": "label the message"},
+                {"role": "user", "content": "I sit at the Pune office."},
+                {"role": "assistant", "content": '{"intent": "provide_info"}'},
+            ],
+        }],
+    )
+    second = ConversationLog("U1", "S-2", root=tmp_path)
+    second.append("Where do I sit?", "You sit at Pune office.", turn=1, intent="recall_fact")
+
+    assert first.path != second.path
+    assert first.path.name == _session_filename("U1", "S-1")
+    assert second.path.name == _session_filename("U1", "S-2")
+
+    # A new object is a new process: it reads the file the first one wrote.
+    reloaded = ConversationLog("U1", "S-1", root=tmp_path)
+    assert reloaded.turns[0]["turn"] == 1
+    assert reloaded.turns[0]["user"] == "I sit at the Pune office."
+    assert reloaded.turns[0]["bot"] == "Thanks, I'll keep that in mind."
+    assert reloaded.turns[0]["intent"] == "provide_info"
+    assert reloaded.turns[0]["calls"][0]["messages"][0]["role"] == "system"
+    assert reloaded.turns[0]["calls"][0]["messages"][2]["role"] == "assistant"
+    # The second session's question is not in the first session's file.
+    assert "Where do I sit?" not in first.path.read_text(encoding="utf-8")
+
+
+def test_a_session_id_with_odd_characters_still_makes_one_file(tmp_path):
+    from src.memory import ConversationLog
+
+    log = ConversationLog("U1", "S 1/tab", root=tmp_path)
+    log.append("Hi.", "Hello.", turn=1, intent="out_of_scope")
+    assert log.path.parent == tmp_path
+    assert log.path.exists()
+    assert "/" not in log.path.name
+
+
+def test_clear_user_removes_only_that_users_memory(tmp_path):
+    from src.memory import Memory
+
+    first = Memory("U1", "S-1", root=tmp_path)
+    first.semantic.remember("U1", "location", "Pune office", 1)
+    first.episodic.add("U1", "Raised TCK-0001 for VPN.", "ticket", session="S-1")
+    first.conversation.append("I sit at Pune.", "Noted.", turn=1, intent="provide_info")
+    other_session = Memory("U1", "S-2", root=tmp_path)
+    other_session.conversation.append("Where do I sit?", "Pune.", turn=1, intent="recall_fact")
+
+    second = Memory("U2", "S-1", root=tmp_path)
+    second.semantic.remember("U2", "location", "Hyderabad", 1)
+    second.episodic.add("U2", "Raised TCK-0002 for Wi-Fi.", "ticket", session="S-1")
+    second.conversation.append("I sit at Hyderabad.", "Noted.", turn=1, intent="provide_info")
+
+    removed = first.clear_user()
+    assert removed["facts"] == 1
+    assert removed["episodes"] == 1
+    assert removed["sessions"] == 2
+
+    assert first.semantic.active("U1") == []
+    assert first.episodic.for_user("U1") == []
+    assert list((tmp_path / "sessions").glob("U1__*.json")) == []
+
+    assert second.semantic.active("U2")[0]["value"] == "Hyderabad"
+    assert second.episodic.for_user("U2")[0]["text"] == "Raised TCK-0002 for Wi-Fi."
+    assert (tmp_path / "sessions" / "U2__S-1.json").exists()

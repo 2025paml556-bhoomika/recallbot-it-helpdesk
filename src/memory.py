@@ -19,13 +19,108 @@ then deletes the summary.
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
+
 from src.episodic_memory import EpisodicMemory
 from src.history import WorkingMemory
 from src.semantic_memory import FACT_KEYS, SemanticMemory
 
+# A session id becomes a filename, so anything that is not a plain character
+# is flattened. Two ids that flatten to the same name would share a file.
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
 # An intent that states nothing worth remembering. recall_fact is a question
 # about a fact already stored, so writing it would store the question itself.
 _SKIP_INTENTS = ("confirm", "reject", "out_of_scope", "recall_fact")
+
+
+def _session_filename(user: str, session: str) -> str:
+    """One safe filename for this user and session.
+
+    The user is part of the name so two users can both have a session
+    called S-1 without sharing a file.
+    """
+    safe_user = _UNSAFE.sub("-", user.strip() or "user").strip("-") or "user"
+    safe_session = _UNSAFE.sub("-", session.strip() or "session").strip("-") or "session"
+    return f"{safe_user}__{safe_session}.json"
+
+
+class ConversationLog:
+    """The transcript of one conversation, one JSON file per session.
+
+    The file is memory/sessions/<user>__<session>.json. It is created on the
+    first turn and rewritten after each later turn, so a restart of the page
+    keeps the same conversation in the same file. Ending the session leaves
+    the file where it is: it is the record of the conversation, not the
+    working summary, which is deleted.
+    """
+
+    def __init__(self, user: str, session: str, root=None) -> None:
+        from src.config import SESSIONS_DIR
+
+        self.user = user
+        self.session = session
+        base = root if root is not None else SESSIONS_DIR
+        self.path = Path(base) / _session_filename(user, session)
+        self.turns: list[dict] = []
+        self._load()
+
+    def append(
+        self,
+        user_text: str,
+        reply: str,
+        *,
+        turn: int,
+        intent: str,
+        calls: list[dict] | None = None,
+        tool: dict | None = None,
+    ) -> dict:
+        """Add one exchange and write the whole file back.
+
+        calls is every model call made for this turn, each one already in
+        message order: system prompt, user prompt, assistant response.
+        tool is the tool that ran, when one did: its name, the arguments it
+        was given, and the result it returned. A turn that called neither
+        still records the user text and the reply.
+
+        A session is a few dozen turns, so rewriting the file is cheaper
+        than keeping a correct JSON array by appending. A crash mid-write
+        can lose the last turn; it cannot leave a truncated array that the
+        next load refuses to parse, because the write is of the whole file.
+        """
+        row = {
+            "turn": turn,
+            "user": user_text,
+            "bot": reply,
+            "intent": intent,
+            "calls": list(calls or []),
+        }
+        if tool is not None:
+            row["tool"] = tool
+        self.turns.append(row)
+        self._save()
+        return row
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        saved = json.loads(self.path.read_text(encoding="utf-8"))
+        loaded = saved.get("turns", [])
+        self.turns = loaded if isinstance(loaded, list) else []
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "user": self.user,
+            "session": self.session,
+            "turns": self.turns,
+        }
+        self.path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
 
 class Memory:
@@ -37,6 +132,10 @@ class Memory:
         self.semantic = SemanticMemory(root)
         self.episodic = EpisodicMemory(root)
         self.working = WorkingMemory(user, session, root)
+        # Beside the memory root when a test passes one, otherwise the shared
+        # sessions folder. An isolated test must not write a real transcript.
+        sessions_root = None if root is None else Path(root) / "sessions"
+        self.conversation = ConversationLog(user, session, sessions_root)
 
     def load(self, text: str) -> dict:
         """The memories relevant to this message.
@@ -89,6 +188,36 @@ class Memory:
             "facts": self.semantic.forget_value(self.user, value),
             "episodes": self.episodic.forget(self.user, value),
         }
+
+    def clear_user(self) -> dict:
+        """Delete everything stored about this user.
+
+        Facts, episodes, this session's working notes, and every conversation
+        file of theirs. Another user's files are not touched. Tickets and
+        bookings live in the helpdesk database, so the caller clears those.
+        """
+        facts = self.semantic.forget_user(self.user)
+        episodes = self.episodic.forget_user(self.user)
+        self.working.end()
+        sessions = _delete_user_sessions(self.user, self.conversation.path.parent)
+        return {"facts": facts, "episodes": episodes, "sessions": sessions}
+
+
+def _delete_user_sessions(user: str, folder: Path) -> int:
+    """Remove memory/sessions files that belong to this user.
+
+    The filename starts with the user's safe name and a double underscore,
+    which is how ConversationLog names them. A user called "U1" must not
+    take "U10"'s files, so the separator is part of the match.
+    """
+    if not folder.exists():
+        return 0
+    prefix = _session_filename(user, "x").split("__", 1)[0] + "__"
+    removed = 0
+    for path in folder.glob(prefix + "*.json"):
+        path.unlink()
+        removed += 1
+    return removed
 
 
 def fact_text(slots: dict) -> list[str]:

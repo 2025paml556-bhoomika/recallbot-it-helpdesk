@@ -84,6 +84,7 @@ class WorkingMemory:
         history: list[dict],
         *,
         turn: int | None = None,
+        trace: list | None = None,
     ) -> str:
         """Rewrite the summary to include the turns since the last one.
 
@@ -104,6 +105,7 @@ class WorkingMemory:
             user=self.user,
             session=self.session,
             turn=turn,
+            trace=trace,
         ).strip()
         self._save()
         return self.summary

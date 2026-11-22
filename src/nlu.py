@@ -67,6 +67,17 @@ _NO = re.compile(
     re.IGNORECASE,
 )
 
+# An explicit change of the user's own office. The destination is the new
+# fact and the origin is not. A bare "to the Pune office" is not a change:
+# that sentence is usually answering a booking question.
+_MOVE_TO = re.compile(
+    r"\b(?:"
+    r"(?:update|change|set)\s+my\s+(?:location|office)\s+(?:from\s+.+?\s+)?to"
+    r"|(?:moved|shifting|shifted|moving)\s+from\s+.+?\s+to"
+    r")\s+([A-Z][A-Za-z]+(?:\s+office)?)",
+    re.IGNORECASE,
+)
+
 SYSTEM_PROMPT = """You label one IT helpdesk message. Reply with a single JSON object and no other text.
 
 The object has two keys:
@@ -80,15 +91,16 @@ Intent meanings:
 - confirm: the user agrees to go ahead, including "yes", "go ahead", and "book that"
 - reject: the user says no, or withdraws a day or a booking, including "no" and "leave Friday"
 - check_ticket: the user asks about an existing ticket
-- provide_info: the user introduces themselves or states a standing fact (their name, their laptop model, which office they sit in, their manager). A question is never provide_info.
+- provide_info: the user introduces themselves or states or changes a standing fact (their name, their laptop model, which office they sit in, their manager). A request to change their own office is provide_info, not out_of_scope and not book_slot. "Update my location from Pune to Gurugram", "I have shifted from Pune to Gurugram", and "Change my office to Gurugram" are provide_info. Put only the new place in location, for example "Gurugram", and leave every other slot null. A question is never provide_info.
 - recall_fact: the user asks what you already know about them, such as "Where do I sit?" or "Which laptop do I use?". They are not stating a new fact and they are not asking about a policy. Every slot stays null.
-- out_of_scope: not an IT helpdesk matter. Greetings, thanks, and "hope your day is going well" are out_of_scope, not provide_info.
+- out_of_scope: not an IT helpdesk matter. Greetings, thanks, and "hope your day is going well" are out_of_scope, not provide_info. Changing the user's own office, desk, or laptop is provide_info, never out_of_scope.
 
 A question about policy, a cycle, a model the user would get, or how something works is ask_kb, even if it mentions a laptop or a printer.
 "desk 14" is part of the location, not a time. time is only a clock time such as "4 pm".
 
-Reply with the JSON object only. Example for "Make it Thursday at 4 pm.":
-{"intent": "book_slot", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": "Thursday", "time": "4 pm", "asset_id": null, "ticket_id": null}}
+Reply with the JSON object only. Examples:
+"Make it Thursday at 4 pm." -> {"intent": "book_slot", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": "Thursday", "time": "4 pm", "asset_id": null, "ticket_id": null}}
+"Update my location from Pune to Gurugram" -> {"intent": "provide_info", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": "Gurugram", "date": null, "time": null, "asset_id": null, "ticket_id": null}}
 
 Rules for slots:
 - Copy only what the user stated. Use null for anything they did not state.
@@ -209,6 +221,13 @@ def _apply_known_codes(text: str, result: dict) -> dict:
         slots["time"] = None
         if slots["location"] and "desk" not in slots["location"].lower():
             slots["location"] = f"{slots['location']}, {time_value.strip()}"
+    # "Update my location from Pune to Gurugram" states a new office. qwen2.5:3b
+    # often labels that as provide_info but leaves location null, or calls the
+    # whole sentence out_of_scope. The new place is the destination of the move.
+    moved = _MOVE_TO.search(text)
+    if moved and slots["location"] is None:
+        result["intent"] = "provide_info"
+        slots["location"] = moved.group(1).strip(" .")
     return result
 
 
@@ -218,12 +237,15 @@ def understand(
     user: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    trace: list | None = None,
 ) -> dict:
     """Label one user sentence.
 
     Returns {"intent", "slots", "source"}. source is "rule" or "llm".
     A rule hit makes no model call and writes no log line. An LLM hit is
     logged by chat() as call_type "nlu" with the API's own token counts.
+    When trace is a list, the system prompt, the user prompt and the model
+    reply are appended to it so the session file can record the call.
     """
     ruled = _rule_based(text)
     if ruled is not None:
@@ -237,6 +259,7 @@ def understand(
         user=user,
         session=session,
         turn=turn,
+        trace=trace,
     )
     result = _normalise(_extract_json(reply))
     return _apply_known_codes(text, result)

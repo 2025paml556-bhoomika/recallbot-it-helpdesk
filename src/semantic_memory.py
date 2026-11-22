@@ -188,6 +188,23 @@ class SemanticMemory:
         self._reindex(self.active_records())
         return removed
 
+    def forget_user(self, user: str) -> int:
+        """Delete every fact this user has, file and index both.
+
+        Another user's facts stay. Returns how many records were removed,
+        including ones already superseded.
+        """
+        kept = []
+        removed = 0
+        for row in self._read():
+            if row["user"] == user:
+                removed += 1
+                continue
+            kept.append(row)
+        self._write(kept)
+        self._reindex(self.active_records())
+        return removed
+
     def forget_value(self, user: str, value: str) -> int:
         """Delete this user's records whose value contains the text."""
         kept = []

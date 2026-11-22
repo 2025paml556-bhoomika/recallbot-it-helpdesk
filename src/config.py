@@ -57,6 +57,10 @@ EPISODIC_IDS_PATH = MEMORY_DIR / "episodic_ids.json"
 # Working memory is one file per session, thrown away when the session ends.
 WORKING_DIR = MEMORY_DIR / "working"
 
+# The transcript of each conversation. One JSON file per (user, session),
+# kept after the session ends. Not the fact store: semantic.jsonl is that.
+SESSIONS_DIR = MEMORY_DIR / "sessions"
+
 # How many past episodes a turn may load. The rest stay on disk.
 EPISODIC_TOP_K = 3
 # Cosine below this is not relevant. A user with no related history gets

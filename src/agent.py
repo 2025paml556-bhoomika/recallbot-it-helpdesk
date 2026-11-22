@@ -4,8 +4,10 @@ Part 1 labels the latest user message with src.nlu.understand.
 Part 2 keeps the slots from earlier turns and fills them in as the user
 answers, so "Thursday, please." is remembered when they later say yes.
 Part 3 decides what to do with that turn. It asks for a slot that is still
-missing, or it calls one tool. It never writes a booking on the turn that
-supplied the last slot: the user must say yes first.
+missing, or it calls one tool. A fault is not raised on the turn it is
+reported: location, date and time are collected first, and the ticket and
+the visit are written together on the turn the user says yes. It never
+writes a booking on the turn that supplied the last slot.
 Part 4 turns that decision into the one sentence the user reads. An ask is
 already a sentence, so it is returned as it stands and no model is called.
 A tool result is phrased by the chat model, which is the only model call
@@ -26,6 +28,8 @@ from src.search_kb import RELEVANCE_THRESHOLD
 from src.tools import NOT_FOUND, book_it_slot, get_ticket, raise_ticket, search_kb
 
 # A booking is not complete until the user has named all three.
+# fix_issue collects the same three before a ticket is raised, so a fault
+# report and a visit share one set of questions.
 BOOKING_SLOTS = ("location", "date", "time")
 
 # Asked in this order, one per turn. location covers site, floor and desk:
@@ -95,6 +99,20 @@ CARRIED_SLOTS = (
 )
 
 
+def _jsonable(value):
+    """A tool result safe to write into the session JSON file.
+
+    Search hits carry the chunk text. Embeddings are not on these dicts,
+    but a value that is not JSON (a Path, a set) is stringified rather than
+    crashing the turn that already succeeded.
+    """
+    try:
+        json.dumps(value, default=str)
+    except TypeError:
+        return str(value)
+    return json.loads(json.dumps(value, default=str))
+
+
 class Session:
     """Slots gathered across the turns of one user in one session.
 
@@ -109,6 +127,9 @@ class Session:
         self.slots: dict[str, str | None] = {name: None for name in SLOT_NAMES}
         self.pending_booking = False
         self.awaiting_confirmation = False
+        # True only after a fix_issue turn. Confirm raises a ticket then.
+        # A plain booking, even one that named the fault, does not.
+        self.pending_ticket = False
         self.history: list[dict] = []
         # None uses the shared helpdesk database. Tests pass their own file.
         self.db_path = db_path
@@ -116,6 +137,10 @@ class Session:
         self.memory = memory if memory is not None else Memory(user, session)
         # What load() returned for the latest turn. Empty until the first one.
         self.recalled: dict = {"summary": "", "facts": [], "episodes": []}
+        # Model calls for the turn currently being answered. ingest() resets it.
+        self.calls: list[dict] = []
+        # The tool decide() ran for this turn, or None when it ran none.
+        self.tool_call: dict | None = None
 
     def ingest(self, text: str) -> dict:
         """Label one message and merge any new slot values into this session.
@@ -128,11 +153,16 @@ class Session:
         # answers from what earlier sessions stored. The label itself still
         # comes from the sentence alone.
         self.recalled = self.memory.load(text)
+        # Calls made while labelling and answering this turn. reply() writes
+        # them into the session file. A new turn starts empty.
+        self.calls = []
+        self.tool_call = None
         understood = understand(
             text,
             user=self.user,
             session=self.session,
             turn=self.turn,
+            trace=self.calls,
         )
         self._merge(understood["intent"], understood["slots"])
         snapshot = {
@@ -179,6 +209,7 @@ class Session:
         if intent == "reject":
             self.pending_booking = False
             self.awaiting_confirmation = False
+            self.pending_ticket = False
             return
 
         if intent != "confirm":
@@ -188,6 +219,11 @@ class Session:
                     self.slots[name] = value.strip()
 
         if intent == "book_slot":
+            self.pending_booking = True
+        elif intent == "provide_info" and self.pending_booking:
+            # An answer to "which office / which day / what time" is sometimes
+            # labelled provide_info. The visit is already underway, so the
+            # value still fills the slot and the next question is still asked.
             self.pending_booking = True
         elif intent == "confirm" and self.pending_booking:
             # Held, not cleared. The tool call that writes the row comes later;
@@ -204,15 +240,21 @@ class Session:
 
         A booking is only written when the user confirms a visit that was
         already fully described. The turn that filled the last slot asks
-        instead of writing. A tool that refuses (no confirmation, unknown
-        ticket) is not called at all, so it cannot log a line.
+        instead of writing. A fault report is that same visit: the ticket
+        is raised on the confirm turn, not on the turn that named the fault.
+        A tool that refuses (no confirmation, unknown ticket) is not called
+        at all, so it cannot log a line.
         """
         if not self.history:
             raise RuntimeError("decide() needs ingest() to have run first")
         intent = self.history[-1]["intent"]
 
         if intent == "ask_kb":
-            return self._tool("search_kb", search_kb(text, user=self.user, session=self.session, turn=self.turn))
+            return self._tool(
+                "search_kb",
+                search_kb(text, user=self.user, session=self.session, turn=self.turn),
+                {"query": text},
+            )
 
         if intent == "check_ticket":
             ticket_id = self.slots.get("ticket_id")
@@ -225,28 +267,24 @@ class Session:
                 turn=self.turn,
                 db_path=self._db_path(),
             )
-            return self._tool("get_ticket", found)
+            return self._tool("get_ticket", found, {"ticket_id": ticket_id, "user": self.user})
 
         if intent == "fix_issue":
             if self.slots.get("ticket_id"):
                 return {"action": ACTION_NONE}
-            issue = self.slots.get("issue_type") or self.slots.get("error_code") or text
-            ticket = raise_ticket(
-                self.user,
-                issue,
-                asset_id=self.slots.get("asset_id"),
-                session=self.session,
-                turn=self.turn,
-                db_path=self._db_path(),
-            )
-            self.slots["ticket_id"] = ticket["ticket_id"]
-            self.memory.remember_event(
-                f"Raised {ticket['ticket_id']} for {ticket['issue_type']}.",
-                "ticket",
-            )
-            return self._tool("raise_ticket", ticket)
+            # Same questions as a visit. The ticket is raised only when the
+            # user confirms a place, a day and a time.
+            self.pending_booking = True
+            self.pending_ticket = True
+            return self._advance_booking()
 
         if intent == "book_slot":
+            return self._advance_booking()
+
+        if intent == "provide_info" and self.pending_booking and self.missing_booking_slots():
+            # The user answered the question the previous turn asked. Keep
+            # collecting. A provide_info turn with nothing left to ask is a
+            # standing fact, not a yes, so it does not confirm the visit.
             return self._advance_booking()
 
         if intent == "recall_fact":
@@ -255,10 +293,16 @@ class Session:
             fact = self._fact_for(text)
             if fact is None:
                 return {"action": ACTION_NONE}
-            return self._tool("recall_fact", fact)
+            return self._tool("recall_fact", fact, {"key": fact.get("key"), "value": fact.get("value")})
 
         if intent == "confirm":
             if self.pending_booking and self.awaiting_confirmation and not self.missing_booking_slots():
+                # A fault report has an issue and no ticket yet, so the
+                # ticket is raised now and the visit is attached to it. A
+                # plain booking has no fault, and must not invent a ticket.
+                # A visit that followed an already-raised ticket reuses it.
+                if self.pending_ticket and not self.slots.get("ticket_id"):
+                    self._raise_current_issue(text)
                 booked = book_it_slot(
                     self.user,
                     self.slots.get("issue_type") or "unspecified",
@@ -280,7 +324,17 @@ class Session:
                     ),
                     "booking",
                 )
-                return self._tool("book_it_slot", booked)
+                return self._tool(
+                    "book_it_slot",
+                    booked,
+                    {
+                        "location": self.slots["location"],
+                        "date": self.slots["date"],
+                        "time": self.slots["time"],
+                        "ticket_id": self.slots.get("ticket_id"),
+                        "confirmed": True,
+                    },
+                )
             return {"action": ACTION_NONE}
 
         # reject, provide_info, out_of_scope: nothing to call and nothing to ask.
@@ -298,6 +352,24 @@ class Session:
             return None
         return max(facts, key=lambda row: row.get("score", 0))
 
+    def _raise_current_issue(self, text: str) -> dict:
+        """Insert the ticket for the fault this session is holding."""
+        issue = self.slots.get("issue_type") or self.slots.get("error_code") or text
+        ticket = raise_ticket(
+            self.user,
+            issue,
+            asset_id=self.slots.get("asset_id"),
+            session=self.session,
+            turn=self.turn,
+            db_path=self._db_path(),
+        )
+        self.slots["ticket_id"] = ticket["ticket_id"]
+        self.memory.remember_event(
+            f"Raised {ticket['ticket_id']} for {ticket['issue_type']}.",
+            "ticket",
+        )
+        return ticket
+
     def _advance_booking(self) -> dict:
         """Ask for the next missing slot, or ask the user to confirm.
 
@@ -314,7 +386,14 @@ class Session:
     def _ask(self, slot: str | None, prompt: str) -> dict:
         return {"action": ACTION_ASK, "slot": slot, "prompt": prompt}
 
-    def _tool(self, name: str, result) -> dict:
+    def _tool(self, name: str, result, arguments: dict | None = None) -> dict:
+        # Kept for the transcript. The result is what the tool returned,
+        # before the model phrases it into the sentence the user reads.
+        self.tool_call = {
+            "name": name,
+            "arguments": arguments or {},
+            "result": _jsonable(result),
+        }
         return {"action": ACTION_TOOL, "name": name, "result": result}
 
     def _db_path(self):
@@ -334,10 +413,14 @@ class Session:
         """
         action = decision.get("action")
         if action == ACTION_ASK:
-            return decision["prompt"]
+            said = decision["prompt"]
+            self._log_exchange(text, said)
+            return said
         if action == ACTION_NONE:
             intent = self.history[-1]["intent"] if self.history else ""
-            return REPLIES.get(intent, REPLIES["out_of_scope"])
+            said = REPLIES.get(intent, REPLIES["out_of_scope"])
+            self._log_exchange(text, said)
+            return said
         if action != ACTION_TOOL:
             raise ValueError(f"unknown action: {action!r}")
 
@@ -347,7 +430,9 @@ class Session:
         # would only risk adding a place or a laptop the user never stated.
         if name == "recall_fact":
             template = FACT_REPLIES.get(result["key"], "Your {key} is {value}.")
-            return template.format(key=result["key"], value=result["value"])
+            said = template.format(key=result["key"], value=result["value"])
+            self._log_exchange(text, said)
+            return said
         if name == "search_kb":
             shown = self._passages(result)
         elif name == "get_ticket":
@@ -366,7 +451,7 @@ class Session:
             raise ValueError(f"unknown tool: {name!r}")
 
         prompt = f"User message: {text}\n\nTool result:\n{shown}"
-        return chat(
+        said = chat(
             prompt,
             system=REPLY_SYSTEM,
             temperature=0.0,
@@ -374,7 +459,33 @@ class Session:
             user=self.user,
             session=self.session,
             turn=self.turn,
+            trace=self.calls,
         ).strip()
+        self._log_exchange(text, said)
+        return said
+
+    def _log_exchange(self, user_text: str, reply: str) -> None:
+        """Append this turn to the session's JSON file.
+
+        The intent is the one ingest() stored for this turn. A reply made
+        with no ingest has nothing to file, so it is skipped rather than
+        inventing a turn number.
+        """
+        if not self.history:
+            return
+        latest = self.history[-1]
+        # A test, or a caller, may hand a partial history row. The transcript
+        # still wants a turn number, and the session counter is the one this
+        # reply was made under.
+        turn = latest["turn"] if "turn" in latest else self.turn
+        self.memory.conversation.append(
+            user_text,
+            reply,
+            turn=turn,
+            intent=latest.get("intent", ""),
+            calls=self.calls,
+            tool=self.tool_call,
+        )
 
     def _passages(self, hits: list[dict]) -> str:
         """The passages the reply may quote.
@@ -413,6 +524,7 @@ class Session:
         """
         self.pending_booking = False
         self.awaiting_confirmation = False
+        self.pending_ticket = False
         self.slots["date"] = None
         self.slots["time"] = None
 

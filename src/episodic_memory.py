@@ -189,6 +189,22 @@ class EpisodicMemory:
         """Every episode of this user, in the order they were written."""
         return [_public(row) for row in self._read() if row["user"] == user]
 
+    def forget_user(self, user: str) -> int:
+        """Drop every episode of this user and rebuild the index.
+
+        Another user's episodes stay. Returns how many were removed.
+        """
+        kept = []
+        removed = 0
+        for row in self._read():
+            if row["user"] == user:
+                removed += 1
+                continue
+            kept.append(row)
+        self._write(kept)
+        self._reindex(kept)
+        return removed
+
     def forget(self, user: str, value: str) -> int:
         """Drop this user's episodes whose text contains the value.
 
