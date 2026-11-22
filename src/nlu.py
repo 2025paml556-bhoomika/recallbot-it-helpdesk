@@ -87,7 +87,7 @@ The object has two keys:
 Intent meanings:
 - fix_issue: something is broken and the user wants it fixed or raised as a ticket
 - ask_kb: a question about a policy, an error code, a procedure, or how something works
-- book_slot: the user is asking for a visit, or answering a booking question with a place, a floor, a desk, a day, or a time. A short reply that is only a place or a time is book_slot, not provide_info.
+- book_slot: the user is asking for a visit, or answering a booking question with a place, a floor, a desk, a day, or a time. A short reply that is only a place or a time is book_slot, not provide_info. When the message says the assistant just asked for an office, a floor, a desk, a day, or a time, the user's reply is the answer to that question: label it book_slot, never provide_info, and copy the place, day, or time into the matching slot.
 - confirm: the user agrees to go ahead, including "yes", "go ahead", and "book that"
 - reject: the user says no, or withdraws a day or a booking, including "no" and "leave Friday"
 - check_ticket: the user asks about an existing ticket
@@ -231,6 +231,20 @@ def _apply_known_codes(text: str, result: dict) -> dict:
     return result
 
 
+def _user_prompt(text: str, pending_question: str | None) -> str:
+    """The sentence, plus the question it answers when one is still open.
+
+    A bare "Pune office, floor 2 and desk 1." looks like a standing fact.
+    The question "Which office, floor, and desk?" makes it the answer to a
+    visit instead. No question is sent on a first message, so a real profile
+    update is not pushed into a booking.
+    """
+    question = (pending_question or "").strip()
+    if not question:
+        return text
+    return f"The assistant just asked: {question}\nThe user replied: {text}"
+
+
 def understand(
     text: str,
     *,
@@ -238,6 +252,7 @@ def understand(
     session: str | None = None,
     turn: int | None = None,
     trace: list | None = None,
+    pending_question: str | None = None,
 ) -> dict:
     """Label one user sentence.
 
@@ -246,13 +261,15 @@ def understand(
     logged by chat() as call_type "nlu" with the API's own token counts.
     When trace is a list, the system prompt, the user prompt and the model
     reply are appended to it so the session file can record the call.
+    pending_question is the line the assistant asked on the previous turn,
+    when that question is still unanswered. It is not sent for a rule hit.
     """
     ruled = _rule_based(text)
     if ruled is not None:
         return ruled
 
     reply = chat(
-        text,
+        _user_prompt(text, pending_question),
         system=SYSTEM_PROMPT,
         temperature=0.0,
         call_type="nlu",

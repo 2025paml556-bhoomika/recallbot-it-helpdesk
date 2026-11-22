@@ -163,6 +163,7 @@ class Session:
             session=self.session,
             turn=self.turn,
             trace=self.calls,
+            pending_question=self._pending_question(),
         )
         self._merge(understood["intent"], understood["slots"])
         snapshot = {
@@ -220,6 +221,12 @@ class Session:
 
         if intent == "book_slot":
             self.pending_booking = True
+        elif intent == "fix_issue" and not self.slots.get("ticket_id"):
+            # The visit questions start on this turn, not on the later
+            # decide() call. The next sentence is an answer to one of them,
+            # so a provide_info mislabel still has a pending booking to fill.
+            self.pending_booking = True
+            self.pending_ticket = True
         elif intent == "provide_info" and self.pending_booking:
             # An answer to "which office / which day / what time" is sometimes
             # labelled provide_info. The visit is already underway, so the
@@ -369,6 +376,22 @@ class Session:
             "ticket",
         )
         return ticket
+
+    def _pending_question(self) -> str | None:
+        """The question the previous turn asked, if it is still unanswered.
+
+        Sent with the next sentence so the label sees what the user is
+        answering. Nothing is pending before the first ask, and a finished
+        or rejected visit has no question left.
+        """
+        if not self.pending_booking:
+            return None
+        if self.awaiting_confirmation:
+            return CONFIRM_BOOKING
+        missing = self.missing_booking_slots()
+        if not missing:
+            return None
+        return BOOKING_ASKS[missing[0]]
 
     def _advance_booking(self) -> dict:
         """Ask for the next missing slot, or ask the user to confirm.

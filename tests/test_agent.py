@@ -49,6 +49,9 @@ def _scripted(replies: dict[str, dict]):
         found = replies.get(text)
         if found is None:
             return understand(text, **kwargs)
+        seen = replies.get("_seen")
+        if isinstance(seen, list):
+            seen.append(kwargs.get("pending_question"))
         slots = {name: None for name in SLOT_NAMES}
         slots.update(found.get("slots", {}))
         return {
@@ -1163,3 +1166,33 @@ def test_a_tool_turn_logs_the_prompts_and_the_tool_call(monkeypatch, tmp_path):
     assert roles == ["system", "user", "assistant"]
     assert "Tool result" in turn["calls"][0]["messages"][1]["content"]
     assert turn["calls"][0]["messages"][2]["content"] == said
+
+def test_the_office_question_is_sent_when_labelling_the_answer(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "_seen": seen,
+                "My downloads are slow on laptop, what to do?": {
+                    "intent": "fix_issue",
+                    "slots": {"issue_type": "slow downloads"},
+                },
+                "Pune office, floor 2 and desk 1.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Pune office, floor 2, desk 1"},
+                },
+            }
+        ),
+    )
+    session = Session("U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("My downloads are slow on laptop, what to do?")
+    asked = session.decide("My downloads are slow on laptop, what to do?")
+    assert asked["prompt"] == BOOKING_ASKS["location"]
+
+    session.ingest("Pune office, floor 2 and desk 1.")
+    nxt = session.decide("Pune office, floor 2 and desk 1.")
+    assert seen == [None, BOOKING_ASKS["location"]]
+    assert nxt == {"action": ACTION_ASK, "slot": "date", "prompt": BOOKING_ASKS["date"]}
+    assert session.slots["location"] == "Pune office, floor 2, desk 1"
+

@@ -102,3 +102,35 @@ def test_live_same_sentence_twice_gives_the_same_intent():
     second = understand(text)
     assert first["intent"] == second["intent"] == "ask_kb"
     assert first["slots"] == second["slots"]
+
+def test_a_pending_question_is_sent_with_the_reply(monkeypatch):
+    seen = {}
+
+    def fake_chat(prompt, **kwargs):
+        seen["prompt"] = prompt
+        return '{"intent": "book_slot", "slots": {"location": "Pune office, floor 2, desk 1"}}'
+
+    monkeypatch.setattr("src.nlu.chat", fake_chat)
+    result = understand(
+        "Pune office, floor 2 and desk 1.",
+        pending_question="Which office, floor, and desk should the engineer come to?",
+    )
+    assert result["intent"] == "book_slot"
+    assert result["slots"]["location"] == "Pune office, floor 2, desk 1"
+    assert seen["prompt"] == (
+        "The assistant just asked: Which office, floor, and desk should the engineer come to?\n"
+        "The user replied: Pune office, floor 2 and desk 1."
+    )
+
+
+def test_no_pending_question_sends_the_sentence_alone(monkeypatch):
+    seen = {}
+
+    def fake_chat(prompt, **kwargs):
+        seen["prompt"] = prompt
+        return '{"intent": "provide_info", "slots": {"location": "Pune office"}}'
+
+    monkeypatch.setattr("src.nlu.chat", fake_chat)
+    understand("I sit at the Pune office.")
+    assert seen["prompt"] == "I sit at the Pune office."
+
