@@ -687,6 +687,66 @@ def test_a_fix_issue_answer_labelled_provide_info_still_asks_for_the_day(monkeyp
     assert _rows(tmp_path / "helpdesk.sqlite", "tickets") == []
 
 
+def test_a_time_labelled_ask_kb_fills_the_slot_instead_of_searching(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "My laptop is facing screen issues.": {
+                    "intent": "fix_issue",
+                    "slots": {"issue_type": "screen issues", "asset_id": "laptop"},
+                },
+                "I sit a pune office at floor 2 and desk 14.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Pune office, floor 2, desk 14"},
+                },
+                "Thursday, next week.": {
+                    "intent": "book_slot",
+                    "slots": {"date": "Thursday, next week"},
+                },
+                "12 PM": {"intent": "ask_kb", "slots": {"time": "12 PM"}},
+            }
+        ),
+    )
+    session = Session("U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path))
+    for text in (
+        "My laptop is facing screen issues.",
+        "I sit a pune office at floor 2 and desk 14.",
+        "Thursday, next week.",
+    ):
+        session.ingest(text)
+        session.decide(text)
+
+    session.ingest("12 PM")
+    decision = session.decide("12 PM")
+    assert decision == {"action": ACTION_ASK, "slot": None, "prompt": CONFIRM_BOOKING}
+    assert session.slots["time"] == "12 PM"
+    assert session.tool_call is None
+
+
+def test_ask_kb_during_a_booking_still_searches_when_no_slot_was_filled(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "My laptop is facing screen issues.": {
+                    "intent": "fix_issue",
+                    "slots": {"issue_type": "screen issues"},
+                },
+                "What does ERR-VPN-809 mean?": {"intent": "ask_kb"},
+            }
+        ),
+    )
+    session = Session("U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("My laptop is facing screen issues.")
+    session.decide("My laptop is facing screen issues.")
+
+    session.ingest("What does ERR-VPN-809 mean?")
+    decision = session.decide("What does ERR-VPN-809 mean?")
+    assert decision["action"] == ACTION_TOOL
+    assert decision["name"] == "search_kb"
+
+
 def test_provide_info_and_a_greeting_call_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",

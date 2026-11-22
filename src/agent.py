@@ -200,6 +200,20 @@ class Session:
         """location, date, time that are still empty, in that order."""
         return [name for name in BOOKING_SLOTS if not self.slots.get(name)]
 
+    def _filled_open_booking_slot(self) -> bool:
+        """True when this turn put a value in location, date, or time.
+
+        Used so a mislabelled answer still advances the visit. A question
+        that names no booking slot does not.
+        """
+        if not self.history:
+            return False
+        message_slots = self.history[-1].get("message_slots") or {}
+        return any(
+            isinstance(message_slots.get(name), str) and message_slots.get(name).strip()
+            for name in BOOKING_SLOTS
+        )
+
     def _merge(self, intent: str, message_slots: dict) -> None:
         """Copy stated slots in. A new value replaces the one carried so far.
 
@@ -227,10 +241,11 @@ class Session:
             # so a provide_info mislabel still has a pending booking to fill.
             self.pending_booking = True
             self.pending_ticket = True
-        elif intent == "provide_info" and self.pending_booking:
+        elif intent in ("provide_info", "ask_kb") and self.pending_booking:
             # An answer to "which office / which day / what time" is sometimes
-            # labelled provide_info. The visit is already underway, so the
-            # value still fills the slot and the next question is still asked.
+            # labelled provide_info, or ask_kb when the reply is a bare time
+            # such as "12 PM". The visit is already underway, so the value
+            # still fills the slot and the next question is still asked.
             self.pending_booking = True
         elif intent == "confirm" and self.pending_booking:
             # Held, not cleared. The tool call that writes the row comes later;
@@ -257,6 +272,11 @@ class Session:
         intent = self.history[-1]["intent"]
 
         if intent == "ask_kb":
+            # "12 PM" after "What time of day works?" is the open slot, not a
+            # knowledge-base question. Search only when it filled nothing the
+            # visit is still waiting for.
+            if self.pending_booking and self._filled_open_booking_slot():
+                return self._advance_booking()
             return self._tool(
                 "search_kb",
                 search_kb(text, user=self.user, session=self.session, turn=self.turn),
