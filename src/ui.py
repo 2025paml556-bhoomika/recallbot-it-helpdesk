@@ -1,9 +1,11 @@
 """A local page for trying the helpdesk and watching the three memories.
 
-One browser tab is one session. Switching user or session starts a fresh
-Session object, which is what a new process would do: slots start empty and
-only the files in memory/ carry over. The page shows, per turn, the reply,
-the intent, the slots, what was recalled, and the rows now on disk.
+One browser tab is one session. The page mints a session id when it loads
+and keeps it in sessionStorage, which is not shared with other tabs. Opening
+a second tab therefore starts a fresh Session: slots start empty and only
+the files in memory/ carry over. Switching user does the same. The page
+shows, per turn, the reply, the intent, the slots, what was recalled, and
+the rows now on disk.
 
 Nothing here is imported by the agent. It is a way to exercise it.
 
@@ -18,7 +20,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from src.agent import Session
-from src.config import DB_PATH, EPISODIC_PATH, SEMANTIC_PATH
+from src.config import DB_PATH
+from src.episodic_memory import EPISODIC_PATH
+from src.semantic_memory import SEMANTIC_PATH
 from src.db import connect
 
 HOST = "127.0.0.1"
@@ -31,7 +35,9 @@ _lock = threading.Lock()
 
 
 def get_session(user: str, session: str) -> Session:
-    key = (user.strip() or "U1", session.strip() or "A")
+    # The page sends the id it minted for this tab. A missing one still has
+    # to name something, but a real tab always sends its own.
+    key = (user.strip() or "U1", session.strip() or "tab")
     with _lock:
         found = _sessions.get(key)
         if found is None:
@@ -212,6 +218,7 @@ PAGE = """<!DOCTYPE html>
   header label { font: 13px/1 sans-serif; color: #c9c1b4; }
   header select, header input { font: 14px sans-serif; padding: 4px 8px;
            background: #3a342c; color: #f4f1ea; border: 1px solid #5b5348; border-radius: 4px; }
+  #session-label { font: 12px ui-monospace, monospace; color: #c9c1b4; }
   main { display: grid; grid-template-columns: 1.3fr .9fr .9fr; gap: 14px; padding: 14px; }
   section { background: #fffdf8; border: 1px solid #e2d9cc; border-radius: 8px; padding: 14px; }
   h2 { font: 600 13px sans-serif; letter-spacing: .08em; text-transform: uppercase;
@@ -249,10 +256,8 @@ PAGE = """<!DOCTYPE html>
   <label>User
     <select id="user"><option>U1</option><option>U2</option></select>
   </label>
-  <label>Session
-    <select id="session"><option>A</option><option>B</option></select>
-  </label>
-  <span style="font:12px sans-serif;color:#9a9084">Switching user or session starts fresh. Only memory/ carries over.</span>
+  <span id="session-label"></span>
+  <span style="font:12px sans-serif;color:#9a9084">Each tab is its own session. Facts in memory/ carry over; this tab's slots do not.</span>
 </header>
 <main>
   <section>
@@ -288,7 +293,18 @@ PAGE = """<!DOCTYPE html>
 const $ = (id) => document.getElementById(id);
 const log = $("log");
 
-function who() { return { user: $("user").value, session: $("session").value }; }
+// sessionStorage is per tab. A second tab does not see this key, so it
+// mints a different id and the server builds a new Session for it.
+let sessionId = sessionStorage.getItem("recallbot-session");
+if (!sessionId) {
+  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+  const rand = Math.random().toString(36).slice(2, 6);
+  sessionId = "S-" + stamp + "-" + rand;
+  sessionStorage.setItem("recallbot-session", sessionId);
+}
+$("session-label").textContent = "Session " + sessionId;
+
+function who() { return { user: $("user").value, session: sessionId }; }
 
 function add(cls, text) {
   const div = document.createElement("div");
@@ -402,15 +418,20 @@ $("do-end").addEventListener("click", async () => {
   $("reflection").value = "";
 });
 
-for (const id of ["user", "session"]) {
-  $(id).addEventListener("change", async () => {
-    log.innerHTML = "";
-    $("recalled").className = "empty";
-    $("recalled").textContent = "Nothing recalled yet.";
-    const res = await fetch("/api/state?user=" + $("user").value);
-    renderState((await res.json()).state);
-  });
-}
+$("user").addEventListener("change", async () => {
+  // A different user in this tab is a different conversation. Mint a new
+  // session so the previous user's slots are not reused.
+  const stamp = new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14);
+  const rand = Math.random().toString(36).slice(2, 6);
+  sessionId = "S-" + stamp + "-" + rand;
+  sessionStorage.setItem("recallbot-session", sessionId);
+  $("session-label").textContent = "Session " + sessionId;
+  log.innerHTML = "";
+  $("recalled").className = "empty";
+  $("recalled").textContent = "Nothing recalled yet.";
+  const res = await fetch("/api/state?user=" + $("user").value);
+  renderState((await res.json()).state);
+});
 
 fetch("/api/state?user=U1").then(r => r.json()).then(d => renderState(d.state));
 </script>

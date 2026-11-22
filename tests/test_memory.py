@@ -51,6 +51,29 @@ def test_a_stated_fact_is_stored_and_small_talk_is_not(tmp_path):
     assert len(store.active("U1")) == 2
 
 
+def test_moving_office_supersedes_the_old_one(tmp_path):
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    memory.record_turn(
+        "I sit at the Pune office.",
+        "provide_info",
+        {"location": "Pune office"},
+        turn=1,
+    )
+    written = memory.record_turn(
+        "I have moved from Pune to Hyderabad.",
+        "provide_info",
+        {"location": "Hyderabad"},
+        turn=2,
+    )
+    assert [row["value"] for row in written] == ["Hyderabad"]
+    active = memory.semantic.active("U1")
+    assert len(active) == 1
+    assert active[0]["value"] == "Hyderabad"
+    assert active[0]["status"] == "active"
+
+
 def test_an_update_leaves_one_active_and_one_superseded(tmp_path):
     store = SemanticMemory(tmp_path)
     store.remember("U1", "location", "Pune", turn=2)
@@ -188,6 +211,16 @@ def test_trim_keeps_the_last_four_turns_and_full_keeps_all():
     assert len(trimmed) == 4
     assert trimmed[0]["user"] == "turn 6"
     assert len(select(history, "summary")) == 2
+
+
+def test_asking_where_i_sit_does_not_write_a_fact(tmp_path):
+    from src.memory import Memory
+
+    memory = Memory("U1", "B", root=tmp_path)
+    memory.semantic.remember("U1", "location", "Pune office", turn=1)
+    written = memory.record_turn("Where do I sit?", "recall_fact", {}, turn=2)
+    assert written == []
+    assert memory.semantic.active("U1")[0]["value"] == "Pune office"
 
 
 def test_ending_a_session_deletes_the_working_summary(monkeypatch, tmp_path):

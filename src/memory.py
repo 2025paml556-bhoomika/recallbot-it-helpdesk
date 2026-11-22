@@ -23,8 +23,9 @@ from src.episodic_memory import EpisodicMemory
 from src.history import WorkingMemory
 from src.semantic_memory import FACT_KEYS, SemanticMemory
 
-# An intent that states nothing worth remembering.
-_SKIP_INTENTS = ("confirm", "reject", "out_of_scope")
+# An intent that states nothing worth remembering. recall_fact is a question
+# about a fact already stored, so writing it would store the question itself.
+_SKIP_INTENTS = ("confirm", "reject", "out_of_scope", "recall_fact")
 
 
 class Memory:
@@ -53,9 +54,9 @@ class Memory:
     def record_turn(self, text: str, intent: str, slots: dict, turn: int) -> list[dict]:
         """Write the facts this turn stated. Returns the records written.
 
-        confirm, reject and out_of_scope state no fact. Anything else is
-        handed to the semantic store, which itself writes nothing for small
-        talk or for a turn with no fact slot.
+        confirm, reject, out_of_scope and recall_fact state no fact. Anything
+        else is handed to the semantic store, which itself writes nothing for
+        small talk or for a turn with no fact slot.
         """
         if intent in _SKIP_INTENTS:
             return []

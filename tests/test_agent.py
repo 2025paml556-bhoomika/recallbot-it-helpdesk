@@ -260,6 +260,10 @@ def test_a_second_user_does_not_see_the_first_users_slots(monkeypatch, tmp_path)
                     "intent": "provide_info",
                     "slots": {"location": "Pune office"},
                 },
+                "I have moved from Pune to Hyderabad.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Hyderabad"},
+                },
             }
         ),
     )
@@ -882,15 +886,20 @@ def test_decide_before_ingest_is_an_error(tmp_path):
         session.decide("Hello.")
 
 
-def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
+def test_a_move_replaces_the_office_a_later_session_reads(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",
         _scripted(
             {
                 "I sit at the Pune office.": {
                     "intent": "provide_info",
-                    "slots": {"location": "Pune office, 3rd floor, desk 14"},
+                    "slots": {"location": "Pune office"},
                 },
+                "I have moved from Pune to Hyderabad.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Hyderabad"},
+                },
+                "Where do I sit?": {"intent": "recall_fact"},
             }
         ),
     )
@@ -900,17 +909,59 @@ def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
     first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
     first.ingest("I sit at the Pune office.")
 
+    second = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
+    moved = second.ingest("I have moved from Pune to Hyderabad.")
+    assert moved["intent"] == "provide_info"
+    assert moved["slots"]["location"] == "Hyderabad"
+    assert [row["value"] for row in second.memory.semantic.active("U1")] == ["Hyderabad"]
+
+    third = Session("U1", "C", memory=Memory("U1", "C", root=tmp_path))
+    asked = third.ingest("Where do I sit?")
+    assert [fact["value"] for fact in asked["recalled"]["facts"]] == ["Hyderabad"]
+
+
+def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "I sit at the Pune office.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Pune office, 3rd floor, desk 14"},
+                },
+                "Where do I sit?": {"intent": "recall_fact"},
+            }
+        ),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("a recalled fact is a fixed line, not a model call")
+
+    monkeypatch.setattr("src.agent.chat", fail)
+
+    first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    first.ingest("I sit at the Pune office.")
+
     # A new session, and a new process would do the same: it reads the file.
     second = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
-    recalled = second.ingest("Where do I sit?")
+    text = "Where do I sit?"
+    recalled = second.ingest(text)
     offices = [fact["value"] for fact in recalled["recalled"]["facts"]]
     assert "Pune office, 3rd floor, desk 14" in offices
+    # The question states nothing, so the stored fact is not rewritten.
+    assert len(second.memory.semantic.active("U1")) == 1
+
+    said = second.reply(text, second.decide(text))
+    assert said == "You sit at Pune office, 3rd floor, desk 14."
 
     # A different user reads the same folder and finds nothing of U1's.
     other = Session("U2", "B", memory=Memory("U2", "B", root=tmp_path))
-    theirs = other.ingest("Where do I sit?")
+    theirs = other.ingest(text)
     assert theirs["recalled"]["facts"] == []
     assert theirs["recalled"]["episodes"] == []
+    assert other.reply(text, other.decide(text)) == REPLIES["recall_fact"]
 
 
 def _fake_embed(texts, **kwargs):

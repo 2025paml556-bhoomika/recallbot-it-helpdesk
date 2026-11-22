@@ -27,6 +27,7 @@ INTENTS = (
     "reject",
     "check_ticket",
     "provide_info",
+    "recall_fact",
     "out_of_scope",
 )
 
@@ -69,7 +70,7 @@ _NO = re.compile(
 SYSTEM_PROMPT = """You label one IT helpdesk message. Reply with a single JSON object and no other text.
 
 The object has two keys:
-- "intent": one of fix_issue, ask_kb, book_slot, confirm, reject, check_ticket, provide_info, out_of_scope
+- "intent": one of fix_issue, ask_kb, book_slot, confirm, reject, check_ticket, provide_info, recall_fact, out_of_scope
 - "slots": an object with exactly these keys: issue_type, error_code, urgency, location, date, time, asset_id, ticket_id
 
 Intent meanings:
@@ -80,6 +81,7 @@ Intent meanings:
 - reject: the user says no, or withdraws a day or a booking, including "no" and "leave Friday"
 - check_ticket: the user asks about an existing ticket
 - provide_info: the user introduces themselves or states a standing fact (their name, their laptop model, which office they sit in, their manager). A question is never provide_info.
+- recall_fact: the user asks what you already know about them, such as "Where do I sit?" or "Which laptop do I use?". They are not stating a new fact and they are not asking about a policy. Every slot stays null.
 - out_of_scope: not an IT helpdesk matter. Greetings, thanks, and "hope your day is going well" are out_of_scope, not provide_info.
 
 A question about policy, a cycle, a model the user would get, or how something works is ask_kb, even if it mentions a laptop or a printer.
@@ -117,6 +119,7 @@ def _rule_based(text: str) -> dict | None:
         slots = empty_slots()
         slots["ticket_id"] = TICKET_RE.fullmatch(stripped).group(0).upper()
         return {"intent": "check_ticket", "slots": slots, "source": "rule"}
+
     return None
 
 

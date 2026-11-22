@@ -149,13 +149,16 @@ class SemanticMemory:
 
         Other users' facts are excluded before scoring. A fact below the
         relevance cut-off is dropped, so an unrelated query returns nothing.
+        The query is also rephrased in the same "office: ..." form the fact
+        was embedded with. "Where do I sit?" is about an office, but those
+        words are far from "office: Pune office" in the embedding space.
         """
         rows = self.active(user)
         if not rows or not query.strip():
             return []
 
         matrix = self._vectors_for(rows)
-        query_vector = embed([query], log=False)[0]
+        query_vector = embed([self._query_text(query)], log=False)[0]
         scores = matrix @ query_vector
         order = np.argsort(-scores)
         found = []
@@ -240,6 +243,21 @@ class SemanticMemory:
     def _text(self, row: dict) -> str:
         label = FACT_LABELS.get(row["key"], row["key"])
         return f"{label}: {row['value']}"
+
+    def _query_text(self, query: str) -> str:
+        """Phrase the question like the stored fact, when it is about one.
+
+        "Where do I sit?" becomes "office: where do I sit", which is the
+        shape the location vector was built from. A question about a laptop
+        is phrased the same way. Anything else is left unchanged, so a
+        password question does not get pulled toward an office fact.
+        """
+        lowered = query.lower()
+        if re.search(r"\b(sit|seat|desk|office|work)\b", lowered):
+            return f"office: {query}"
+        if re.search(r"\b(laptop|asset|machine|computer)\b", lowered):
+            return f"laptop: {query}"
+        return query
 
     def _next_id(self) -> str:
         return f"sem-{len(self._read()) + 1:04d}"

@@ -53,6 +53,16 @@ REPLIES = {
     "out_of_scope": "I can only help with IT issues.",
     "confirm": "There is nothing waiting to book.",
     "fix_issue": "That is already raised.",
+    # Said when the user asks about themselves and nothing stored matches.
+    "recall_fact": "I don't have that stored for you.",
+}
+
+# How a stored fact is read back. The key is the slot name, not the sentence
+# the user asked, so "Where do I sit?" and "Which office am I based at?" share
+# one line. A key with no entry is read as "Your <key> is <value>."
+FACT_REPLIES = {
+    "location": "You sit at {value}.",
+    "asset_id": "You use {value}.",
 }
 
 # The model phrases a tool result. It must not call a tool, and it must not
@@ -239,6 +249,14 @@ class Session:
         if intent == "book_slot":
             return self._advance_booking()
 
+        if intent == "recall_fact":
+            # Answered from memory, not from the knowledge base. A question
+            # states no new fact, so nothing is written on this turn either.
+            fact = self._fact_for(text)
+            if fact is None:
+                return {"action": ACTION_NONE}
+            return self._tool("recall_fact", fact)
+
         if intent == "confirm":
             if self.pending_booking and self.awaiting_confirmation and not self.missing_booking_slots():
                 booked = book_it_slot(
@@ -267,6 +285,18 @@ class Session:
 
         # reject, provide_info, out_of_scope: nothing to call and nothing to ask.
         return {"action": ACTION_NONE}
+
+    def _fact_for(self, text: str) -> dict | None:
+        """The stored fact this question is about, or None.
+
+        Recall already dropped facts that are not close to the question, and
+        it already dropped every other user's facts. The closest remaining
+        one is the answer. Ties keep the order recall returned them in.
+        """
+        facts = self.recalled.get("facts") or []
+        if not facts:
+            return None
+        return max(facts, key=lambda row: row.get("score", 0))
 
     def _advance_booking(self) -> dict:
         """Ask for the next missing slot, or ask the user to confirm.
@@ -313,6 +343,11 @@ class Session:
 
         name = decision["name"]
         result = decision["result"]
+        # A recalled fact is already a sentence. Phrasing it with the model
+        # would only risk adding a place or a laptop the user never stated.
+        if name == "recall_fact":
+            template = FACT_REPLIES.get(result["key"], "Your {key} is {value}.")
+            return template.format(key=result["key"], value=result["value"])
         if name == "search_kb":
             shown = self._passages(result)
         elif name == "get_ticket":

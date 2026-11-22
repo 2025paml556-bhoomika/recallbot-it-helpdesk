@@ -144,6 +144,24 @@
       "text": "Thanks, that's all for today.",
       "intent": "out_of_scope",
       "slots": {}
+    },
+    {
+      "id": "N25",
+      "text": "Where do I sit?",
+      "intent": "recall_fact",
+      "slots": {}
+    },
+    {
+      "id": "N26",
+      "text": "Which laptop do I use?",
+      "intent": "recall_fact",
+      "slots": {}
+    },
+    {
+      "id": "N27",
+      "text": "I have moved from Pune to Hyderabad.",
+      "intent": "provide_info",
+      "slots": {"location": "Hyderabad"}
     }
   ]
 }
