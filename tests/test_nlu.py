@@ -134,3 +134,51 @@ def test_no_pending_question_sends_the_sentence_alone(monkeypatch):
     understand("I sit at the Pune office.")
     assert seen["prompt"] == "I sit at the Pune office."
 
+
+def test_a_reschedule_labelled_out_of_scope_becomes_book_slot(monkeypatch):
+    payload = json.dumps({"intent": "out_of_scope", "slots": {}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("Can I change the timing of my booking?")
+    assert result["intent"] == "book_slot"
+    assert result["slots"]["time"] is None
+
+
+def test_moving_office_stays_provide_info_and_is_not_a_reschedule(monkeypatch):
+    payload = json.dumps({"intent": "out_of_scope", "slots": {}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("Update my location from Pune to Gurugram")
+    assert result["intent"] == "provide_info"
+    assert result["slots"]["location"] == "Gurugram"
+
+def test_a_last_issue_labelled_recall_fact_becomes_check_ticket(monkeypatch):
+    payload = json.dumps({"intent": "recall_fact", "slots": {}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("Whats the last issue I raised?")
+    assert result["intent"] == "check_ticket"
+    assert result["slots"]["ticket_id"] is None
+
+
+def test_where_do_i_sit_stays_recall_fact(monkeypatch):
+    payload = json.dumps({"intent": "recall_fact", "slots": {}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("Where do I sit?")
+    assert result["intent"] == "recall_fact"
+
+def test_sharing_booking_details_labelled_book_slot_becomes_check_ticket(monkeypatch):
+    payload = json.dumps({
+        "intent": "book_slot",
+        "slots": {"location": None, "date": "tuesday", "time": None},
+    })
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("Share the details of booking")
+    assert result["intent"] == "check_ticket"
+    assert result["slots"]["date"] is None
+    assert result["slots"]["time"] is None
+
+
+def test_changing_the_timing_is_not_treated_as_a_details_request(monkeypatch):
+    payload = json.dumps({"intent": "book_slot", "slots": {}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("change the timing of my last booking")
+    assert result["intent"] == "book_slot"
+

@@ -1256,3 +1256,274 @@ def test_the_office_question_is_sent_when_labelling_the_answer(monkeypatch, tmp_
     assert nxt == {"action": ACTION_ASK, "slot": "date", "prompt": BOOKING_ASKS["date"]}
     assert session.slots["location"] == "Pune office, floor 2, desk 1"
 
+
+def _booked_visit(monkeypatch, tmp_path):
+    """A confirmed visit: Pune office, Thursday, 4 pm. Returns session, db path."""
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Pune office, Thursday at 4 pm.": {
+                    "intent": "book_slot",
+                    "slots": {
+                        "location": "Pune office",
+                        "date": "Thursday",
+                        "time": "4 pm",
+                        "issue_type": "VPN failure",
+                    },
+                },
+            }
+        ),
+    )
+    db_path = tmp_path / "helpdesk.sqlite"
+    session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("Pune office, Thursday at 4 pm.")
+    session.decide("Pune office, Thursday at 4 pm.")
+    session.ingest("yes")
+    session.decide("yes")
+    return session, db_path
+
+
+def test_changing_the_timing_asks_for_a_new_time(monkeypatch, tmp_path):
+    session, db_path = _booked_visit(monkeypatch, tmp_path)
+    assert len(_rows(db_path, "slots")) == 1
+    # understand() now returns book_slot for this sentence. The script stands
+    # in for that, including the case where the model said out_of_scope and
+    # the NLU override corrected it.
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Can I change the timing of my booking?": {"intent": "book_slot", "slots": {}},
+            }
+        ),
+    )
+    text = "Can I change the timing of my booking?"
+    latest = session.ingest(text)
+    decision = session.decide(text)
+
+    assert latest["intent"] == "book_slot"
+    # The day stays. Only the time the user asked to change is collected again.
+    assert latest["slots"]["time"] is None
+    assert latest["slots"]["date"] == "Thursday"
+    assert latest["slots"]["location"] == "Pune office"
+    assert decision == {
+        "action": ACTION_ASK,
+        "slot": "time",
+        "prompt": BOOKING_ASKS["time"],
+    }
+    assert session.pending_booking is True
+    assert session.awaiting_confirmation is False
+    assert session.reschedule_slot_id == _rows(db_path, "slots")[0]["slot_id"]
+    assert len(_rows(db_path, "slots")) == 1
+
+
+def test_a_new_time_on_a_reschedule_asks_to_confirm(monkeypatch, tmp_path):
+    session, db_path = _booked_visit(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Move it to 4 pm.": {"intent": "book_slot", "slots": {"time": "5 pm"}}}),
+    )
+    text = "Move it to 4 pm."
+    latest = session.ingest(text)
+    decision = session.decide(text)
+
+    assert latest["slots"]["time"] == "5 pm"
+    # The day is restored from the visit being changed, so only a confirm
+    # is left. Saying yes updates that row instead of inserting another.
+    assert latest["slots"]["date"] == "Thursday"
+    assert latest["slots"]["location"] == "Pune office"
+    assert decision == {
+        "action": ACTION_ASK,
+        "slot": None,
+        "prompt": CONFIRM_BOOKING,
+    }
+    assert len(_rows(db_path, "slots")) == 1
+
+    session.ingest("yes")
+    updated = session.decide("yes")
+    assert updated["name"] == "update_slot"
+    rows = _rows(db_path, "slots")
+    assert len(rows) == 1
+    assert rows[0]["time"] == "5 pm"
+    assert rows[0]["date"] == "Thursday"
+    assert rows[0]["location"] == "Pune office"
+    assert rows[0]["slot_id"] == updated["result"]["slot_id"]
+
+def test_last_issue_with_no_id_reads_the_newest_ticket(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Please raise the VPN failure.": {
+            "intent": "fix_issue",
+            "slots": {
+                "issue_type": "VPN connection",
+                "location": "Gurugram office",
+                "date": "Sunday",
+                "time": "2 pm",
+            },
+        }}),
+    )
+    db_path = tmp_path / "helpdesk.sqlite"
+    session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("Please raise the VPN failure.")
+    session.decide("Please raise the VPN failure.")
+    session.ingest("yes")
+    raised = session.decide("yes")
+    ticket_id = raised["result"]["ticket_id"]
+
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"what was the last issue I raised?": {"intent": "check_ticket"}}),
+    )
+    text = "what was the last issue I raised?"
+    session.ingest(text)
+    decision = session.decide(text)
+
+    assert decision["action"] == ACTION_TOOL
+    assert decision["name"] == "get_ticket"
+    assert decision["result"]["ticket_id"] == ticket_id
+    assert decision["result"]["issue_type"] == "VPN connection"
+    # The id was not in the message, so the carried slot stays empty.
+    assert session.slots["ticket_id"] == ticket_id
+
+
+def test_last_issue_labelled_recall_fact_still_reads_the_ticket(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Please raise the VPN failure.": {
+            "intent": "fix_issue",
+            "slots": {
+                "issue_type": "VPN connection",
+                "location": "Gurugram office",
+                "date": "Sunday",
+                "time": "2 pm",
+            },
+        }}),
+    )
+    db_path = tmp_path / "helpdesk.sqlite"
+    session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("Please raise the VPN failure.")
+    session.decide("Please raise the VPN failure.")
+    session.ingest("yes")
+    session.decide("yes")
+
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Whats the last issue I raised?": {"intent": "recall_fact"}}),
+    )
+    text = "Whats the last issue I raised?"
+    session.ingest(text)
+    decision = session.decide(text)
+    assert decision["name"] == "get_ticket"
+    assert decision["result"]["owner_user"] == "U1"
+    assert decision["result"]["issue_type"] == "VPN connection"
+
+
+def test_last_booking_reads_the_visit_not_the_ticket(monkeypatch, tmp_path):
+    session, _db_path = _booked_visit(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"what is my last booking?": {"intent": "check_ticket"}}),
+    )
+    text = "what is my last booking?"
+    session.ingest(text)
+    decision = session.decide(text)
+
+    assert decision["action"] == ACTION_TOOL
+    assert decision["name"] == "get_booking"
+    assert decision["result"]["location"] == "Pune office"
+    assert decision["result"]["date"] == "Thursday"
+    assert decision["result"]["time"] == "4 pm"
+    assert decision["result"]["ticket_id"] is None
+
+
+def test_another_users_last_issue_is_not_found(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Please raise the VPN failure.": {
+            "intent": "fix_issue",
+            "slots": {
+                "issue_type": "VPN connection",
+                "location": "Gurugram office",
+                "date": "Sunday",
+                "time": "2 pm",
+            },
+        }}),
+    )
+    db_path = tmp_path / "helpdesk.sqlite"
+    owner = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
+    owner.ingest("Please raise the VPN failure.")
+    owner.decide("Please raise the VPN failure.")
+    owner.ingest("yes")
+    owner.decide("yes")
+
+    other = Session("U2", "B", db_path=db_path, memory=Memory("U2", "B", root=tmp_path / "u2"))
+    other.history.append({"intent": "check_ticket"})
+    other.turn = 1
+    decision = other.decide("what was the last issue I raised?")
+    assert decision["name"] == "get_ticket"
+    assert decision["result"] == "not found"
+
+
+def test_a_status_question_that_names_nothing_still_asks(monkeypatch, tmp_path):
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    session.history.append({"intent": "check_ticket"})
+    session.turn = 1
+    decision = session.decide("How is it going?")
+    assert decision == {
+        "action": ACTION_ASK,
+        "slot": None,
+        "prompt": "Which ticket should I look up?",
+    }
+
+def test_share_the_details_of_booking_reads_the_visit(monkeypatch, tmp_path):
+    session, db_path = _booked_visit(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Share the details of booking": {"intent": "book_slot", "slots": {}}}),
+    )
+    # The live path corrects book_slot before decide(). This test covers the
+    # lookup itself when the sentence still arrives labelled book_slot, which
+    # is what used to ask "Which day works for the visit?".
+    text = "Share the details of booking"
+    # Re-label the way understand() does, so a book_slot mislabel is corrected.
+    from src.nlu import _apply_known_codes, empty_slots
+    corrected = _apply_known_codes(text, {"intent": "book_slot", "slots": empty_slots()})
+    assert corrected["intent"] == "check_ticket"
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({text: corrected}),
+    )
+    session.ingest(text)
+    decision = session.decide(text)
+    assert decision["action"] == ACTION_TOOL
+    assert decision["name"] == "get_booking"
+    assert decision["result"]["location"] == "Pune office"
+    assert decision["result"]["time"] == "4 pm"
+    assert len(_rows(db_path, "slots")) == 1
+    assert session.pending_booking is False
+
+def test_booking_details_are_phrased_without_the_issue(monkeypatch, tmp_path):
+    session, _db_path = _booked_visit(monkeypatch, tmp_path)
+    session.slots["issue_type"] = "network_connection"
+    seen = {}
+
+    def fake(prompt, **kwargs):
+        seen["prompt"] = prompt
+        return "Booking 1 at Pune office on Thursday at 4 pm, status booked."
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Details of my last booking, please": {"intent": "check_ticket"}}),
+    )
+    text = "Details of my last booking, please"
+    session.ingest(text)
+    said = session.reply(text, session.decide(text))
+    assert said.startswith("Booking")
+    assert "network_connection" not in seen["prompt"]
+    assert "issue" not in seen["prompt"].lower()
+    assert "Pune office" in seen["prompt"]
+    assert "Thursday" in seen["prompt"]
+    assert "4 pm" in seen["prompt"]
+

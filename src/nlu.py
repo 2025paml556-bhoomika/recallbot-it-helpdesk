@@ -78,6 +78,33 @@ _MOVE_TO = re.compile(
     re.IGNORECASE,
 )
 
+# Changing a booked visit, as opposed to a standing fact such as "change my
+# office". The verb has to sit next to a visit word, so "change my office to
+# Gurugram" is not a reschedule.
+# A question about the user's own ticket or visit, not a standing fact.
+_LAST_RECORD = re.compile(
+    r"\b(?:ticket|issue|problem|fault|booking|visit|appointment)s?\b",
+    re.IGNORECASE,
+)
+
+# "Share the details of booking" asks to read a visit, not to book one.
+# "Book a visit" and "change the timing of my booking" are requests, not reads.
+_BOOKING_DETAILS = re.compile(
+    r"\b(?:share|show|give|tell|what|whats|what's)\b.{0,40}\b(?:detail|details|status|info|information)\b"
+    r"|\b(?:detail|details|status)\b.{0,30}\b(?:booking|visit|appointment|slot)\b"
+    r"|\b(?:booking|visit|appointment|slot)\b.{0,30}\b(?:detail|details|status)\b",
+    re.IGNORECASE,
+)
+
+_RESCHEDULE = re.compile(
+    r"\b(?:"
+    r"(?:change|move|reschedule|shift|update)\s+(?:the\s+|my\s+)?(?:timing|time|day|date|slot|booking|visit|appointment)"
+    r"|(?:change|move|reschedule|shift)\s+it\b"
+    r"|reschedule\b"
+    r")",
+    re.IGNORECASE,
+)
+
 SYSTEM_PROMPT = """You label one IT helpdesk message. Reply with a single JSON object and no other text.
 
 The object has two keys:
@@ -87,20 +114,25 @@ The object has two keys:
 Intent meanings:
 - fix_issue: something is broken and the user wants it fixed or raised as a ticket
 - ask_kb: a question about a policy, an error code, a procedure, or how something works
-- book_slot: the user is asking for a visit, or answering a booking question with a place, a floor, a desk, a day, or a time. A short reply that is only a place or a time is book_slot, not provide_info. When the message says the assistant just asked for an office, a floor, a desk, a day, or a time, the user's reply is the answer to that question: label it book_slot, never provide_info, and copy the place, day, or time into the matching slot.
+- book_slot: the user is asking for a visit, answering a booking question with a place, a floor, a desk, a day, or a time, or changing the time, day, or place of a visit they already booked. A short reply that is only a place or a time is book_slot, not provide_info. When the message says the assistant just asked for an office, a floor, a desk, a day, or a time, the user's reply is the answer to that question: label it book_slot, never provide_info, and copy the place, day, or time into the matching slot. "Can I change the timing of my booking?", "Reschedule my visit", and "Move it to 4 pm" are book_slot, never out_of_scope and never provide_info. If they name a new time, day, or place, copy it into that slot. If they only ask to change it and name nothing new, leave that slot null.
 - confirm: the user agrees to go ahead, including "yes", "go ahead", and "book that"
 - reject: the user says no, or withdraws a day or a booking, including "no" and "leave Friday"
-- check_ticket: the user asks about an existing ticket
+- check_ticket: the user asks about an existing ticket, or about the last issue they raised, or about a visit that was already booked. "What was the last issue I raised?", "What is the last ticket I raised?", "Is there any ticket raised for me?", "What is my last booking?", and "Share the details of booking" are check_ticket, never book_slot and never recall_fact. Leave ticket_id null unless they named an id such as TCK-0001.
 - provide_info: the user introduces themselves or states or changes a standing fact (their name, their laptop model, which office they sit in, their manager). A request to change their own office is provide_info, not out_of_scope and not book_slot. "Update my location from Pune to Gurugram", "I have shifted from Pune to Gurugram", and "Change my office to Gurugram" are provide_info. Put only the new place in location, for example "Gurugram", and leave every other slot null. A question is never provide_info.
-- recall_fact: the user asks what you already know about them, such as "Where do I sit?" or "Which laptop do I use?". They are not stating a new fact and they are not asking about a policy. Every slot stays null.
-- out_of_scope: not an IT helpdesk matter. Greetings, thanks, and "hope your day is going well" are out_of_scope, not provide_info. Changing the user's own office, desk, or laptop is provide_info, never out_of_scope.
+- recall_fact: the user asks what you already know about them, such as "Where do I sit?" or "Which laptop do I use?". They are not stating a new fact and they are not asking about a policy. A question about a ticket, an issue they raised, or a booking is check_ticket, not recall_fact. Every slot stays null.
+- out_of_scope: not an IT helpdesk matter. Greetings, thanks, and "hope your day is going well" are out_of_scope, not provide_info. Changing the user's own office, desk, or laptop is provide_info, never out_of_scope. Changing the time, day, or place of a booked visit is book_slot, never out_of_scope.
 
 A question about policy, a cycle, a model the user would get, or how something works is ask_kb, even if it mentions a laptop or a printer.
 "desk 14" is part of the location, not a time. time is only a clock time such as "4 pm".
 
 Reply with the JSON object only. Examples:
 "Make it Thursday at 4 pm." -> {"intent": "book_slot", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": "Thursday", "time": "4 pm", "asset_id": null, "ticket_id": null}}
+"Can I change the timing of my booking?" -> {"intent": "book_slot", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": null, "time": null, "asset_id": null, "ticket_id": null}}
+"Move it to 4 pm." -> {"intent": "book_slot", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": null, "time": "4 pm", "asset_id": null, "ticket_id": null}}
 "Update my location from Pune to Gurugram" -> {"intent": "provide_info", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": "Gurugram", "date": null, "time": null, "asset_id": null, "ticket_id": null}}
+"What was the last issue I raised?" -> {"intent": "check_ticket", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": null, "time": null, "asset_id": null, "ticket_id": null}}
+"What is my last booking?" -> {"intent": "check_ticket", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": null, "time": null, "asset_id": null, "ticket_id": null}}
+"Share the details of booking" -> {"intent": "check_ticket", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": null, "time": null, "asset_id": null, "ticket_id": null}}
 
 Rules for slots:
 - Copy only what the user stated. Use null for anything they did not state.
@@ -228,6 +260,21 @@ def _apply_known_codes(text: str, result: dict) -> dict:
     if moved and slots["location"] is None:
         result["intent"] = "provide_info"
         slots["location"] = moved.group(1).strip(" .")
+    # "Can I change the timing of my booking?" is a visit change. qwen2.5:3b
+    # often calls that out_of_scope. A standing office move is left alone.
+    elif result["intent"] == "out_of_scope" and _RESCHEDULE.search(text) and moved is None:
+        result["intent"] = "book_slot"
+    # "What was the last issue I raised?" is a ticket lookup. The same model
+    # often files it as recall_fact, which never opens the ticket table.
+    elif result["intent"] == "recall_fact" and _LAST_RECORD.search(text):
+        result["intent"] = "check_ticket"
+    # "Share the details of booking" is a read. qwen2.5:3b often calls it
+    # book_slot, which then asks for a day and a time the user did not request.
+    elif result["intent"] in ("book_slot", "ask_kb", "recall_fact") and _BOOKING_DETAILS.search(text) and moved is None:
+        if not _RESCHEDULE.search(text):
+            result["intent"] = "check_ticket"
+            for name in ("location", "date", "time"):
+                result["slots"][name] = None
     return result
 
 

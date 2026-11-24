@@ -13,7 +13,7 @@ import pytest
 
 from src.config import LOG_PATH
 from src.db import connect
-from src.tools import NOT_FOUND, book_it_slot, get_ticket, raise_ticket, search_kb
+from src.tools import NOT_FOUND, book_it_slot, get_ticket, latest_booking, latest_ticket, raise_ticket, search_kb, update_slot
 
 
 def _log_lines() -> list[str]:
@@ -115,3 +115,70 @@ def test_book_it_slot_writes_nothing_until_confirmed(db_path):
     assert logged["input_tokens"] == 0
     assert logged["output_tokens"] == 0
     assert logged["confirmed"] is True
+
+def test_latest_ticket_is_the_owners_newest_row(db_path):
+    raise_ticket("U1", "VPN connection", ticket_id="TCK-0001", db_path=db_path)
+    raise_ticket("U2", "printer jam", ticket_id="TCK-0002", db_path=db_path)
+    newest = raise_ticket("U1", "vpn", ticket_id="TCK-0003", db_path=db_path)
+    before = _log_lines()
+
+    found = latest_ticket("U1", db_path=db_path)
+    assert found["ticket_id"] == newest["ticket_id"]
+    assert found["issue_type"] == "vpn"
+    assert latest_ticket("U3", db_path=db_path) == NOT_FOUND
+
+    # The hit is logged. The user with no tickets is not.
+    added = [json.loads(line) for line in _log_lines()[len(before):]]
+    assert len(added) == 1
+    assert added[0]["tool"] == "get_ticket"
+    assert added[0]["ticket_id"] == "TCK-0003"
+    assert added[0]["latest"] is True
+    assert added[0]["input_tokens"] == 0
+
+
+def test_latest_booking_is_the_owners_newest_visit(db_path):
+    book_it_slot(
+        "U1", "VPN", "Gurugram office", "Today", "2 pm",
+        confirmed=True, db_path=db_path,
+    )
+    second = book_it_slot(
+        "U1", "vpn", "Pune office", "Monday", "3 pm",
+        confirmed=True, db_path=db_path,
+    )
+    book_it_slot(
+        "U2", "wifi", "Mumbai office", "Friday", "11 am",
+        confirmed=True, db_path=db_path,
+    )
+
+    found = latest_booking("U1", db_path=db_path)
+    assert found["slot_id"] == second["slot_id"]
+    assert found["location"] == "Pune office"
+    assert found["time"] == "3 pm"
+    assert latest_booking("U3", db_path=db_path) == NOT_FOUND
+
+def test_update_slot_changes_the_row_instead_of_inserting(db_path):
+    booked = book_it_slot(
+        "U1", "VPN", "Pune office", "Thursday", "4 pm",
+        confirmed=True, db_path=db_path,
+    )
+    before = _log_lines()
+    updated = update_slot(
+        "U1", booked["slot_id"], time_of_day="5 pm", db_path=db_path,
+    )
+    assert updated["slot_id"] == booked["slot_id"]
+    assert updated["time"] == "5 pm"
+    assert updated["date"] == "Thursday"
+    assert updated["location"] == "Pune office"
+
+    conn = connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) AS n FROM slots").fetchone()["n"] == 1
+    finally:
+        conn.close()
+
+    assert update_slot("U2", booked["slot_id"], time_of_day="6 pm", db_path=db_path) == NOT_FOUND
+    added = [json.loads(line) for line in _log_lines()[len(before):]]
+    assert len(added) == 1
+    assert added[0]["tool"] == "update_slot"
+    assert added[0]["input_tokens"] == 0
+

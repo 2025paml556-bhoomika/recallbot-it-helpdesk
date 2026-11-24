@@ -124,6 +124,91 @@ def get_ticket(
     return ticket
 
 
+def latest_ticket(
+    user: str,
+    *,
+    session: str | None = None,
+    turn: int | None = None,
+    db_path=DB_PATH,
+) -> dict | str:
+    """This user's newest ticket, or "not found" when they have none.
+
+    "What was the last issue I raised?" names no ticket id. The newest row
+    owned by `user` is the one that answers it. Another user's tickets are
+    not visible. A user with no tickets returns "not found" and logs nothing.
+    """
+    start = time.time()
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE owner_user = ?
+            ORDER BY created_at DESC, ticket_id DESC
+            LIMIT 1
+            """,
+            (user,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return NOT_FOUND
+
+    ticket = dict(row)
+    _log_tool(
+        "get_ticket",
+        start,
+        user=user,
+        session=session,
+        turn=turn,
+        extra={"ticket_id": ticket["ticket_id"], "latest": True},
+    )
+    return ticket
+
+
+def latest_booking(
+    user: str,
+    *,
+    session: str | None = None,
+    turn: int | None = None,
+    db_path=DB_PATH,
+) -> dict | str:
+    """This user's newest booked visit, or "not found" when they have none.
+
+    A booking question is not answered with a ticket row. The newest slots
+    row owned by `user` is the visit. Another user's visits are not visible.
+    """
+    start = time.time()
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT * FROM slots
+            WHERE owner_user = ?
+            ORDER BY created_at DESC, slot_id DESC
+            LIMIT 1
+            """,
+            (user,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        return NOT_FOUND
+
+    booked = dict(row)
+    _log_tool(
+        "get_booking",
+        start,
+        user=user,
+        session=session,
+        turn=turn,
+        extra={"slot_id": booked["slot_id"], "latest": True},
+    )
+    return booked
+
+
 def book_it_slot(
     user: str,
     issue_type: str,
@@ -189,6 +274,64 @@ def book_it_slot(
         extra={"slot_id": booked["slot_id"], "confirmed": True},
     )
     return booked
+
+
+def update_slot(
+    user: str,
+    slot_id: int,
+    *,
+    location: str | None = None,
+    date: str | None = None,
+    time_of_day: str | None = None,
+    session: str | None = None,
+    turn: int | None = None,
+    db_path=DB_PATH,
+) -> dict | str:
+    """Change one of this user's visits. A missing or other-owned row is "not found".
+
+    Only the fields the caller passes are written. The row stays the same
+    slot, so a time change does not create a second booking.
+    """
+    start = time.time()
+    conn = connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM slots WHERE slot_id = ? AND owner_user = ?",
+            (slot_id, user),
+        ).fetchone()
+        if row is None:
+            return NOT_FOUND
+        current = dict(row)
+        new_location = location if location is not None else current["location"]
+        new_date = date if date is not None else current["date"]
+        new_time = time_of_day if time_of_day is not None else current["time"]
+        conn.execute(
+            """
+            UPDATE slots
+            SET location = ?, date = ?, time = ?
+            WHERE slot_id = ? AND owner_user = ?
+            """,
+            (new_location, new_date, new_time, slot_id, user),
+        )
+        conn.commit()
+        updated = dict(
+            conn.execute(
+                "SELECT * FROM slots WHERE slot_id = ?",
+                (slot_id,),
+            ).fetchone()
+        )
+    finally:
+        conn.close()
+
+    _log_tool(
+        "update_slot",
+        start,
+        user=user,
+        session=session,
+        turn=turn,
+        extra={"slot_id": slot_id, "confirmed": True},
+    )
+    return updated
 
 
 def raise_ticket(

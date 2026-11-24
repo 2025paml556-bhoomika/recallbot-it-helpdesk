@@ -5,7 +5,9 @@
       "id": "N01",
       "text": "The VPN keeps failing with ERR-VPN-809. What does that code mean?",
       "intent": "ask_kb",
-      "slots": {"error_code": "ERR-VPN-809"}
+      "slots": {
+        "error_code": "ERR-VPN-809"
+      }
     },
     {
       "id": "N02",
@@ -23,25 +25,34 @@
       "id": "N04",
       "text": "The Pune office.",
       "intent": "book_slot",
-      "slots": {"location": "Pune office"}
+      "slots": {
+        "location": "Pune office"
+      }
     },
     {
       "id": "N05",
       "text": "Third floor, desk 14.",
       "intent": "book_slot",
-      "slots": {"location": "3rd floor, desk 14"}
+      "slots": {
+        "location": "3rd floor, desk 14"
+      }
     },
     {
       "id": "N06",
       "text": "Thursday, please.",
       "intent": "book_slot",
-      "slots": {"date": "Thursday"}
+      "slots": {
+        "date": "Thursday"
+      }
     },
     {
       "id": "N07",
       "text": "Make it Thursday at 4 pm.",
       "intent": "book_slot",
-      "slots": {"date": "Thursday", "time": "4 pm"}
+      "slots": {
+        "date": "Thursday",
+        "time": "4 pm"
+      }
     },
     {
       "id": "N08",
@@ -89,13 +100,17 @@
       "id": "N15",
       "text": "It's a LAP-T14G3, the older 14 inch model.",
       "intent": "provide_info",
-      "slots": {"asset_id": "LAP-T14G3"}
+      "slots": {
+        "asset_id": "LAP-T14G3"
+      }
     },
     {
       "id": "N16",
       "text": "I sit at the Pune office, on the third floor.",
       "intent": "provide_info",
-      "slots": {"location": "Pune office, 3rd floor"}
+      "slots": {
+        "location": "Pune office, 3rd floor"
+      }
     },
     {
       "id": "N17",
@@ -113,13 +128,17 @@
       "id": "N19",
       "text": "What is the status of ticket TCK-1001?",
       "intent": "check_ticket",
-      "slots": {"ticket_id": "TCK-1001"}
+      "slots": {
+        "ticket_id": "TCK-1001"
+      }
     },
     {
       "id": "N20",
       "text": "My printer shows ERR-PRINT-017 and nothing comes out. Please fix it.",
       "intent": "fix_issue",
-      "slots": {"error_code": "ERR-PRINT-017"}
+      "slots": {
+        "error_code": "ERR-PRINT-017"
+      }
     },
     {
       "id": "N21",
@@ -137,7 +156,9 @@
       "id": "N23",
       "text": "TCK-1001",
       "intent": "check_ticket",
-      "slots": {"ticket_id": "TCK-1001"}
+      "slots": {
+        "ticket_id": "TCK-1001"
+      }
     },
     {
       "id": "N24",
@@ -161,7 +182,17 @@
       "id": "N27",
       "text": "I have moved from Pune to Hyderabad.",
       "intent": "provide_info",
-      "slots": {"location": "Hyderabad"}
+      "slots": {
+        "location": "Hyderabad"
+      }
+    },
+    {
+      "id": "N28",
+      "text": "Update my location from Pune to Gurugram",
+      "intent": "provide_info",
+      "slots": {
+        "location": "Gurugram"
+      }
     }
   ]
 }

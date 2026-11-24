@@ -21,11 +21,22 @@ from __future__ import annotations
 import argparse
 import json
 
+import re
+
 from src.llm import chat
 from src.memory import Memory
 from src.nlu import SLOT_NAMES, understand
 from src.search_kb import RELEVANCE_THRESHOLD
-from src.tools import NOT_FOUND, book_it_slot, get_ticket, raise_ticket, search_kb
+from src.tools import (
+    NOT_FOUND,
+    book_it_slot,
+    get_ticket,
+    latest_booking,
+    latest_ticket,
+    raise_ticket,
+    search_kb,
+    update_slot,
+)
 
 # A booking is not complete until the user has named all three.
 # fix_issue collects the same three before a ticket is raised, so a fault
@@ -77,7 +88,8 @@ You are given the user's message and the result of a tool that has already run. 
 - Do not call a tool, do not invent a ticket id, a time, or a place, and do not add a step the result does not state.
 - If the result is a knowledge-base passage, answer from it in one or two sentences and name the document it came from.
 - If the result says nothing relevant was found, say you don't know. Do not guess.
-- If the result is a ticket or a booking, report its id and its status.
+- If the result is a ticket, report its id, its status, and the issue.
+- If the result is a booking, report the booking id, the place, the day, the time, and the status. The user asked about the visit. Do not mention the issue, the fault, or the ticket, even if the result includes an issue line.
 - Write the reply only. No JSON, no preamble.
 """
 
@@ -96,6 +108,47 @@ CARRIED_SLOTS = (
     "time",
     "asset_id",
     "ticket_id",
+)
+
+# "What was the last issue I raised?" and "my last booking" name no id.
+# The model files both under check_ticket or recall_fact. A booking word
+# reads the newest visit; anything else about a ticket reads the newest ticket.
+_LAST_BOOKING = re.compile(
+    r"\b(?:last|latest|recent|previous|my)\b.{0,40}\b(?:booking|visit|appointment|slot)\b"
+    r"|\b(?:booking|visit|appointment|slot)\b.{0,40}\b(?:last|latest|recent|previous)\b"
+    r"|\b(?:share|show|give|tell|what|whats|what's)\b.{0,40}\b(?:detail|details|status|info|information)\b.{0,40}\b(?:booking|visit|appointment|slot)\b"
+    r"|\b(?:detail|details|status)\b.{0,30}\b(?:booking|visit|appointment|slot)\b"
+    r"|\b(?:booking|visit|appointment|slot)\b.{0,30}\b(?:detail|details|status)\b",
+    re.IGNORECASE,
+)
+_LAST_TICKET = re.compile(
+    r"\b(?:last|latest|recent|previous|any)\b.{0,40}\b(?:ticket|issue|problem|fault)s?\b"
+    r"|\b(?:ticket|issue|problem|fault)s?\b.{0,40}\b(?:last|latest|recent|previous|raised|for me)\b"
+    r"|\braised\b.{0,20}\b(?:ticket|issue|problem|fault)s?\b",
+    re.IGNORECASE,
+)
+
+# A request to change a visit that is already booked. "change my office" is a
+# standing fact and is not matched here.
+_RESCHEDULE_TIME = re.compile(
+    r"\b(?:timing|time of day|what time|the time)\b|\b(?:change|move|reschedule|shift)\s+(?:the\s+|my\s+)?time\b",
+    re.IGNORECASE,
+)
+_RESCHEDULE_DATE = re.compile(
+    r"\b(?:change|move|reschedule|shift)\s+(?:the\s+|my\s+)?(?:day|date)\b",
+    re.IGNORECASE,
+)
+_RESCHEDULE_PLACE = re.compile(
+    r"\b(?:change|move|reschedule|shift)\s+(?:the\s+)?(?:visit\s+)?(?:to\s+)?(?:location|place|office)\b",
+    re.IGNORECASE,
+)
+_RESCHEDULE = re.compile(
+    r"\b(?:"
+    r"(?:change|move|reschedule|shift|update)\s+(?:the\s+|my\s+)?(?:timing|time|day|date|slot|booking|visit|appointment)"
+    r"|(?:change|move|reschedule|shift)\s+it\b"
+    r"|reschedule\b"
+    r")",
+    re.IGNORECASE,
 )
 
 
@@ -130,6 +183,9 @@ class Session:
         # True only after a fix_issue turn. Confirm raises a ticket then.
         # A plain booking, even one that named the fault, does not.
         self.pending_ticket = False
+        # The visit a "change the timing" turn is editing. None means the
+        # next confirm inserts a new row rather than changing one.
+        self.reschedule_slot_id: int | None = None
         self.history: list[dict] = []
         # None uses the shared helpdesk database. Tests pass their own file.
         self.db_path = db_path
@@ -175,6 +231,14 @@ class Session:
             "slots": self.slots_so_far(),
         }
         self.history.append(snapshot)
+        if understood["intent"] == "book_slot" and self._reschedule(understood["slots"]):
+            # The sentence asked to change a visit. The slot it named is
+            # cleared only when no new value was given, and the existing
+            # visit is remembered so confirm updates that row.
+            self.history[-1]["slots"] = self.slots_so_far()
+            self.pending_booking = True
+            self.awaiting_confirmation = False
+            self._arm_reschedule()
         # A stated fact is written now, so a later session can read it. A
         # greeting, a yes, or a no writes nothing.
         self.memory.record_turn(
@@ -199,6 +263,64 @@ class Session:
     def missing_booking_slots(self) -> list[str]:
         """location, date, time that are still empty, in that order."""
         return [name for name in BOOKING_SLOTS if not self.slots.get(name)]
+
+    def _reschedule(self, message_slots: dict) -> bool:
+        """True when this sentence asks to change a visit that is already booked.
+
+        The new value, when the sentence names one, is already in the slots.
+        The part that was not named is restored from the booked visit and
+        then cleared, so the next question asks only for that part.
+        """
+        if not self.history:
+            return False
+        text = self.history[-1].get("text") or ""
+        if not _RESCHEDULE.search(text):
+            return False
+        # The existing day and time stay. _arm_reschedule() drops only the
+        # part this sentence asked to change, after it has copied them back
+        # from the booked visit. Clearing them here would forget the day of
+        # a time change, and the confirm turn would insert a second visit.
+        return True
+
+    def _arm_reschedule(self) -> None:
+        """Point this change at the user's newest visit, and refill its day and time.
+
+        note_booked() clears the day and the time so a brand new visit cannot
+        reuse them. A change is not a new visit: the day and the time stay,
+        and only the part the user is replacing is collected again.
+        """
+        if self.reschedule_slot_id is not None:
+            return
+        found = latest_booking(
+            self.user,
+            session=self.session,
+            turn=self.turn,
+            db_path=self._db_path(),
+        )
+        if not isinstance(found, dict):
+            return
+        self.reschedule_slot_id = found["slot_id"]
+        if not self.slots.get("date"):
+            self.slots["date"] = found["date"]
+        if not self.slots.get("time"):
+            self.slots["time"] = found["time"]
+        if not self.slots.get("location"):
+            self.slots["location"] = found["location"]
+        # The sentence already said which part to replace, and named no new
+        # value. Drop that part now that the rest has been restored.
+        text = self.history[-1].get("text") or "" if self.history else ""
+        message_slots = self.history[-1].get("message_slots") or {} if self.history else {}
+
+        def stated(name: str) -> bool:
+            value = message_slots.get(name)
+            return isinstance(value, str) and bool(value.strip())
+
+        if _RESCHEDULE_TIME.search(text) and not stated("time"):
+            self.slots["time"] = None
+        elif _RESCHEDULE_DATE.search(text) and not stated("date"):
+            self.slots["date"] = None
+        elif _RESCHEDULE_PLACE.search(text) and not stated("location"):
+            self.slots["location"] = None
 
     def _filled_open_booking_slot(self) -> bool:
         """True when this turn put a value in location, date, or time.
@@ -225,6 +347,7 @@ class Session:
             self.pending_booking = False
             self.awaiting_confirmation = False
             self.pending_ticket = False
+            self.reschedule_slot_id = None
             return
 
         if intent != "confirm":
@@ -284,17 +407,12 @@ class Session:
             )
 
         if intent == "check_ticket":
-            ticket_id = self.slots.get("ticket_id")
-            if not ticket_id:
-                return self._ask(None, "Which ticket should I look up?")
-            found = get_ticket(
-                ticket_id,
-                self.user,
-                session=self.session,
-                turn=self.turn,
-                db_path=self._db_path(),
-            )
-            return self._tool("get_ticket", found, {"ticket_id": ticket_id, "user": self.user})
+            return self._lookup_record(text)
+
+        if intent == "recall_fact" and self._asks_for_record(text):
+            # "Last ticket" is sometimes labelled as a memory question. The
+            # ticket and the visit live in the helpdesk tables, not in facts.
+            return self._lookup_record(text)
 
         if intent == "fix_issue":
             if self.slots.get("ticket_id"):
@@ -330,19 +448,33 @@ class Session:
                 # A visit that followed an already-raised ticket reuses it.
                 if self.pending_ticket and not self.slots.get("ticket_id"):
                     self._raise_current_issue(text)
-                booked = book_it_slot(
-                    self.user,
-                    self.slots.get("issue_type") or "unspecified",
-                    self.slots["location"],
-                    self.slots["date"],
-                    self.slots["time"],
-                    confirmed=True,
-                    ticket_id=self.slots.get("ticket_id"),
-                    asset_id=self.slots.get("asset_id"),
-                    session=self.session,
-                    turn=self.turn,
-                    db_path=self._db_path(),
-                )
+                if self.reschedule_slot_id is not None:
+                    booked = update_slot(
+                        self.user,
+                        self.reschedule_slot_id,
+                        location=self.slots["location"],
+                        date=self.slots["date"],
+                        time_of_day=self.slots["time"],
+                        session=self.session,
+                        turn=self.turn,
+                        db_path=self._db_path(),
+                    )
+                    tool_name = "update_slot"
+                else:
+                    booked = book_it_slot(
+                        self.user,
+                        self.slots.get("issue_type") or "unspecified",
+                        self.slots["location"],
+                        self.slots["date"],
+                        self.slots["time"],
+                        confirmed=True,
+                        ticket_id=self.slots.get("ticket_id"),
+                        asset_id=self.slots.get("asset_id"),
+                        session=self.session,
+                        turn=self.turn,
+                        db_path=self._db_path(),
+                    )
+                    tool_name = "book_it_slot"
                 self.note_booked()
                 self.memory.remember_event(
                     (
@@ -352,13 +484,14 @@ class Session:
                     "booking",
                 )
                 return self._tool(
-                    "book_it_slot",
+                    tool_name,
                     booked,
                     {
                         "location": self.slots["location"],
                         "date": self.slots["date"],
                         "time": self.slots["time"],
-                        "ticket_id": self.slots.get("ticket_id"),
+                        "ticket_id": booked.get("ticket_id") if isinstance(booked, dict) else None,
+                        "slot_id": booked.get("slot_id") if isinstance(booked, dict) else None,
                         "confirmed": True,
                     },
                 )
@@ -366,6 +499,52 @@ class Session:
 
         # reject, provide_info, out_of_scope: nothing to call and nothing to ask.
         return {"action": ACTION_NONE}
+
+    def _asks_for_record(self, text: str) -> bool:
+        """True when the sentence asks for a ticket or a booking, not a fact."""
+        return bool(_LAST_TICKET.search(text) or _LAST_BOOKING.search(text))
+
+    def _lookup_record(self, text: str) -> dict:
+        """Read the ticket or visit this sentence is asking about.
+
+        A named ticket id still reads that ticket. "My last booking" reads
+        the newest visit, because a ticket row cannot answer it. "My last
+        issue" names no id, so it reads the newest ticket owned by this user.
+        A status question that names neither is asked back.
+        """
+        if _LAST_BOOKING.search(text):
+            found = latest_booking(
+                self.user,
+                session=self.session,
+                turn=self.turn,
+                db_path=self._db_path(),
+            )
+            return self._tool("get_booking", found, {"user": self.user, "latest": True})
+
+        ticket_id = self.slots.get("ticket_id")
+        if not ticket_id and _LAST_TICKET.search(text):
+            found = latest_ticket(
+                self.user,
+                session=self.session,
+                turn=self.turn,
+                db_path=self._db_path(),
+            )
+            ticket_id = found["ticket_id"] if isinstance(found, dict) else None
+            return self._tool(
+                "get_ticket",
+                found,
+                {"ticket_id": ticket_id, "user": self.user, "latest": True},
+            )
+        if not ticket_id:
+            return self._ask(None, "Which ticket should I look up?")
+        found = get_ticket(
+            ticket_id,
+            self.user,
+            session=self.session,
+            turn=self.turn,
+            db_path=self._db_path(),
+        )
+        return self._tool("get_ticket", found, {"ticket_id": ticket_id, "user": self.user})
 
     def _fact_for(self, text: str) -> dict | None:
         """The stored fact this question is about, or None.
@@ -480,14 +659,17 @@ class Session:
             shown = self._passages(result)
         elif name == "get_ticket":
             shown = self._ticket_text(result)
+        elif name == "get_booking":
+            shown = self._booking_text(result)
         elif name == "raise_ticket":
             shown = (
                 f"Raised {result['ticket_id']} for {self.user}, "
                 f"status {result['status']}, issue: {result['issue_type']}."
             )
-        elif name == "book_it_slot":
+        elif name in ("book_it_slot", "update_slot"):
+            verb = "Updated" if name == "update_slot" else "Booked"
             shown = (
-                f"Booked slot {result['slot_id']} at {result['location']} "
+                f"{verb} slot {result['slot_id']} at {result['location']} "
                 f"on {result['date']} at {result['time']}, status {result['status']}."
             )
         else:
@@ -558,6 +740,15 @@ class Session:
             f"status {result['status']}, issue: {result['issue_type']}."
         )
 
+    def _booking_text(self, result) -> str:
+        if result == NOT_FOUND or not isinstance(result, dict):
+            return "No booking was found for this user."
+        return (
+            f"Booking {result['slot_id']} for {result['owner_user']} "
+            f"at {result['location']} on {result['date']} at {result['time']}, "
+            f"status {result['status']}."
+        )
+
     def note_booked(self) -> None:
         """Call after a confirmed booking has been written.
 
@@ -568,6 +759,7 @@ class Session:
         self.pending_booking = False
         self.awaiting_confirmation = False
         self.pending_ticket = False
+        self.reschedule_slot_id = None
         self.slots["date"] = None
         self.slots["time"] = None
 
