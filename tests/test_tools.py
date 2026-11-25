@@ -130,6 +130,23 @@ def test_book_it_slot_writes_nothing_until_confirmed(db_path):
     assert logged["output_tokens"] == 0
     assert logged["confirmed"] is True
 
+def test_generated_ticket_id_skips_past_a_gap(db_path):
+    first = raise_ticket("U1", "VPN connection", db_path=db_path)
+    second = raise_ticket("U1", "printer jam", db_path=db_path)
+    assert first["ticket_id"] == "TCK-0001"
+    assert second["ticket_id"] == "TCK-0002"
+
+    conn = connect(db_path)
+    try:
+        conn.execute("DELETE FROM tickets WHERE ticket_id = ?", ("TCK-0001",))
+        conn.commit()
+    finally:
+        conn.close()
+
+    third = raise_ticket("U1", "vpn", db_path=db_path)
+    assert third["ticket_id"] == "TCK-0003"
+
+
 def test_latest_ticket_is_the_owners_newest_row(db_path):
     raise_ticket("U1", "VPN connection", ticket_id="TCK-0001", db_path=db_path)
     raise_ticket("U2", "printer jam", ticket_id="TCK-0002", db_path=db_path)

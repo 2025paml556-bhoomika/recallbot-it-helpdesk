@@ -17,6 +17,7 @@ missing ticket, wrong owner) writes nothing.
 from __future__ import annotations
 
 import argparse
+import re
 import time
 from typing import Any
 
@@ -26,6 +27,8 @@ from src.logger import log_call
 from src.search_kb import search_kb as search_kb_index
 
 NOT_FOUND = "not found"
+
+_TICKET_NUMBER = re.compile(r"^TCK-(\d+)$")
 
 # What a tool call records. Tools do not spend model tokens.
 TOOL_MODEL = "tool"
@@ -372,6 +375,17 @@ def update_slot(
     return updated
 
 
+def _next_ticket_id(conn) -> str:
+    """Return TCK-<n>, one past the highest ticket number already stored."""
+    rows = conn.execute("SELECT ticket_id FROM tickets").fetchall()
+    highest = 0
+    for row in rows:
+        found = _TICKET_NUMBER.fullmatch(row["ticket_id"])
+        if found:
+            highest = max(highest, int(found.group(1)))
+    return f"TCK-{highest + 1:04d}"
+
+
 def raise_ticket(
     user: str,
     issue_type: str,
@@ -387,13 +401,14 @@ def raise_ticket(
     """Insert one ticket owned by `user`. Used by tests and the dialogue loop.
 
     ticket_id is generated as TCK-<n> when the caller does not supply one.
+    The number is one past the highest id already stored, so a deleted
+    ticket cannot make the next insert reuse a primary key.
     """
     start = time.time()
     conn = connect(db_path)
     try:
         if ticket_id is None:
-            count = conn.execute("SELECT COUNT(*) AS n FROM tickets").fetchone()["n"]
-            ticket_id = f"TCK-{count + 1:04d}"
+            ticket_id = _next_ticket_id(conn)
         created_at = time.strftime("%Y-%m-%dT%H:%M:%S")
         conn.execute(
             """
