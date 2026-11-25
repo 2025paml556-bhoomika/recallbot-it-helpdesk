@@ -80,7 +80,7 @@ python -m src.bench_index
 ```
 
 Prints the vector count after one year (knowledge-base chunks plus 100,000 users' facts and episodes, taken from `data/test_conversation.json`), the bytes for a flat float32 index and for HNSW with M=16 using the FAISS per-vector formula, query latency of both on 100,000 vectors, and HNSW recall against flat on `data/kb_questions.json`. The same numbers are written to `results/bench_index.csv`. `--n` raises the vector count and `--queries` the number of timed queries. The run embeds the chunks, so the first call downloads `all-MiniLM-L6-v2` if it is not cached.
-| `memory/` | Semantic and episodic stores (Steps 7–8) |
+| `memory/` | Semantic and episodic stores (Steps 7–8). Profile facts are `os`, `laptop_model`, `office`, `floor`, `department`, `manager`, `contact_time`, `vpn_client`, `personal_phone`, read off the sentence. An episode's importance (1 to 10) is the rule in `rate()` and is logged as `importance`. Ending a session writes a reflection, logged as `reflect`, which the next session retrieves |
 | `logs/calls.jsonl` | Append-only call log. Never edit lines |
 | `results/plots/` | Token and evaluation plots |
 

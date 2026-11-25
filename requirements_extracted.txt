@@ -1,0 +1,944 @@
+
+
+===== PAGE 1 =====
+
+PCA MZG517 Conversational Generative AI — Mini Project 1  
+Overview 
+You will build, measure and defend RecallBot, a task-oriented assistant that answers from a domain 
+knowledge base with hybrid retrieval, completes a booking-style task, and remembers a returning user 
+across sessions with semantic and episodic memory, all inside a fixed context window. Marks reward 
+evidence from your own runs and your reasoning, not the amount of code. 
+Table 1. Key details of Mini Project 1 
+Item Detail 
+Course PCA MZG517 Conversational Generative AI (EC-1, Mini Project 1) 
+Weightage 20 marks, individual 
+Opens 14/11/2026, 11:59 pm 
+Surprise probe set 
+released 
+24/11/2026 on the LMS (see Task 4c) 
+Closes 28/11/2026, 11:59 pm, LMS only (email submissions are not accepted) 
+Syllabus covered CS1 Generative AI for dialogue; CS2 Anatomy of a conversational agent; CS3 
+Embeddings and vector search; CS4 Retrieval systems; CS5 Memory systems 
+Concepts you will use. 
+Table 2. Concepts from CS1 to CS5 used in this project 
+Session Concepts used in this project 
+CS1 Generative AI for 
+dialogue 
+System prompt and user turn, prompt structure and templates, few-shot, 
+decoding (greedy, temperature, top-p), grounding and clarification 
+subdialogues, dialogue-quality rubric, LLM-as-judge 
+CS2 Anatomy of a 
+conversational agent 
+NLU (entities, rule and zero-shot intent, hybrid), state tracker, dialogue 
+manager loop, slot filling, confirm before a write, tools (database read, 
+database write, retrieval), template vs LLM NLG 
+CS3 Embeddings and 
+vector search 
+Tokenization and token cost, prompt caching, embedding models and pooling, 
+cosine similarity, exact vs ANN search, HNSW memory and parameters 
+CS4 Retrieval systems RAG pipeline, chunking and overlap, dense and sparse retrieval, BM25, hybrid 
+search with RRF, hit rate@k, RAG prompt, token budget, debugging failures 
+CS5 Memory systems Short-term memory (trimming, summarization), episodic memory (memory 
+stream, recency + importance + relevance, reflection), semantic memory (fact 
+notebook), procedural memory (skill library), model-native vs external 
+memory, context engineering 
+
+===== PAGE 2 =====
+
+Problem statement and your variant 
+Build RecallBot, a task-oriented assistant for your assigned domain, following the 
+conversational agent pipeline from CS2. It answers policy and FAQ questions from 
+a knowledge base with hybrid retrieval, completes one task through slot filling, and 
+remembers a returning user across two sessions. 
+RecallBot has three parts: 
+1. Dialogue pipeline. NLU (intent and entities), a state tracker, a dialogue manager and NLG. At 
+least three tools: search_kb(query) (your hybrid retrieval), a database read (for example 
+get_order) and a database write that the user confirms before it runs (for example book_slot). 
+Use SQLite or JSON for the database. 
+2. Knowledge base. At least 15 domain documents (policies, FAQs, service notes), 4,000 to 8,000 
+words in total. Include at least 10 codes or IDs (plan codes, error codes, item IDs) and at least 2 
+documents that exist in an old and a new version (for example a 2025 and a 2026 refund policy). 
+3. Memory system. Four kinds of memory, placed as CS5 recommends: what is read every turn 
+stays model-native; what must persist and scale goes to an external store. 
+Table 3. Memory types in RecallBot 
+Memory type 
+(CS5) 
+What it holds in RecallBot Where it lives Task 
+Short-term 
+(working) 
+Recent turns, trimmed or summarised, plus the 
+dialogue state 
+Model-native: 
+the prompt 
+2 
+Semantic Facts about the user (preferences, constraints, profile) 
+as keyed records; your knowledge base is the domain 
+part of semantic memory 
+External: key-
+value records 
+plus vector 
+index 
+3(a), 3(b), 3(c) 
+Episodic A time-stamped stream of what happened (bookings, 
+complaints, decisions) with an importance score, plus 
+reflections written at the end of each session 
+External: vector 
+index 
+3(d) 
+Procedural Your system prompt and the step list of your slot-filling 
+task, kept as versioned files in skills/ and loaded at 
+run time 
+External files, 
+read into the 
+prompt 
+2(a) 
+Session A and Session B run as separate processes: anything the bot knows in Session B must come from 
+disk, not from Python variables. 
+Your variant is the row against your name in Table 5. Do not swap variants. A submission built for a 
+different variant gets zero for Tasks 1, 3(f) and 5. 
+ 
+ 
+ 
+
+===== PAGE 3 =====
+
+Twist definitions (each twist adds at least 2 probes in Task 1 and requirement 3(f) in Task 3): 
+Table 4. Twist definitions 
+Twist What your system must handle 
+A. Multi-user isolation Two users (U1, U2) share one deployment. Memory retrieval must filter on 
+the user field; show a probe where U2 asks about something only U1 said. 
+B. Time-bound facts Documents and user facts carry validity dates. Retrieval must filter or down-
+rank expired items, so the newer policy and the current user fact win (see 
+the stale-chunk failure in CS4). 
+C. Codes and IDs At least 40% of your knowledge-base questions contain an exact code or ID. 
+Report dense, BM25 and hybrid hit rate on these questions separately and 
+explain the gap. 
+D. Code-mixed input At least 30% of user turns are code-mixed (Hinglish, Tanglish or similar). 
+Measure their token cost against English versions with your tokenizer, and 
+show how retrieval copes (for example, rewriting the query to English 
+before search). 
+E. Small context 
+window 
+Your context window is 2,048 tokens. Your token budget must decide how 
+many chunks, memories and history turns fit, and you must show what gets 
+cut. 
+Variant allocation (window k = turns kept by the trimming strategy; context window = the limit your 
+token budget must respect; scale is used in Task 5): 
+Table 5. Variant allocation by student 
+Variant Name Domain Twist Window k 
+(turns) 
+Context 
+window 
+(tokens) 
+Scale 
+(daily 
+users) 
+V01 AKKIRAJU 
+CHAKRITHA 
+Clinic appointment 
+desk 
+A. Multi-user isolation 3 8,192 5,000 
+V02 AKSHAYA B Personal budgeting 
+coach 
+B. Time-bound facts 4 4,096 25,000 
+V03 ANKIT SAHA University 
+admissions 
+helpdesk 
+C. Codes and IDs 5 8,192 100,000 
+V04 ATINDRA R K 
+RANJANA SINGH 
+Travel itinerary 
+planner 
+D. Code-mixed input 6 4,096 5,000 
+V05 AVINASH KUMAR 
+BARNWAL 
+E-commerce 
+orders and returns 
+E. Small context 
+window 
+3 2,048 25,000 
+
+===== PAGE 4 =====
+
+Variant Name Domain Twist Window k 
+(turns) 
+Context 
+window 
+(tokens) 
+Scale 
+(daily 
+users) 
+V06 BHOOMIKA BATHLA Corporate IT 
+helpdesk 
+A. Multi-user isolation 4 4,096 100,000 
+V07 BUVANESWARI E Meal planner 
+(allergies, diets) 
+B. Time-bound facts 5 8,192 5,000 
+V08 CHANDRA MOULI G. Language tutor C. Codes and IDs 6 4,096 25,000 
+V09 CHINTAPATLAWAR 
+ADARSH SANTOSH 
+HR onboarding 
+assistant 
+D. Code-mixed input 3 8,192 100,000 
+V10 D ASRITHA Rental home 
+search assistant 
+E. Small context 
+window 
+4 2,048 5,000 
+V11 DEEPAK GARG Clinic appointment 
+desk 
+C. Codes and IDs 5 8,192 25,000 
+V12 GM CHANDRA 
+KISHORE 
+Personal budgeting 
+coach 
+D. Code-mixed input 6 4,096 100,000 
+V13 HARIHARAN E University 
+admissions 
+helpdesk 
+E. Small context 
+window 
+3 2,048 5,000 
+V14 KAMMADANAM 
+SOWMYA 
+Travel itinerary 
+planner 
+A. Multi-user isolation 4 4,096 25,000 
+V15 KAPIL CHHABRA E-commerce 
+orders and returns 
+B. Time-bound facts 5 8,192 100,000 
+V16 KARTHIKEYAN B Corporate IT 
+helpdesk 
+C. Codes and IDs 6 4,096 5,000 
+V17 LAVANYA G V Meal planner 
+(allergies, diets) 
+D. Code-mixed input 3 8,192 25,000 
+V18 MOHAMMED 
+NADEEMODDIN 
+MOIZODDIN 
+Language tutor E. Small context 
+window 
+4 2,048 100,000 
+V19 NIKHIL AGARWAL HR onboarding 
+assistant 
+A. Multi-user isolation 5 8,192 5,000 
+V20 PILLI SIVA 
+GOWTHAM REDDY 
+Rental home 
+search assistant 
+B. Time-bound facts 6 4,096 25,000 
+V21 SABARINATH R Clinic appointment 
+desk 
+E. Small context 
+window 
+3 2,048 100,000 
+
+===== PAGE 5 =====
+
+Variant Name Domain Twist Window k 
+(turns) 
+Context 
+window 
+(tokens) 
+Scale 
+(daily 
+users) 
+V22 SATYA PRAKASH Personal budgeting 
+coach 
+A. Multi-user isolation 4 8,192 5,000 
+V23 SHAH RONAK 
+YOGESHKUMAR 
+University 
+admissions 
+helpdesk 
+B. Time-bound facts 5 4,096 25,000 
+V24 SHRUTI DUBEY Travel itinerary 
+planner 
+C. Codes and IDs 6 8,192 100,000 
+V25 SHUBHRA KHARE E-commerce 
+orders and returns 
+D. Code-mixed input 3 4,096 5,000 
+V26 SNEHALATHA M Corporate IT 
+helpdesk 
+E. Small context 
+window 
+4 2,048 25,000 
+V27 SRINIVASAN N S Meal planner 
+(allergies, diets) 
+A. Multi-user isolation 5 4,096 100,000 
+V28 SUNIDHI SHARMA Language tutor B. Time-bound facts 6 8,192 5,000 
+V29 TAKKARS BHAVANI HR onboarding 
+assistant 
+C. Codes and IDs 3 4,096 25,000 
+V30 TARUNKUMAR S Rental home 
+search assistant 
+D. Code-mixed input 4 8,192 100,000 
+V31 VENKATA SRINIVASA 
+RAO TUNUGUNTLA 
+Clinic appointment 
+desk 
+B. Time-bound facts 5 4,096 5,000 
+V32 VIJAYA KUMAR 
+NALLA 
+Personal budgeting 
+coach 
+C. Codes and IDs 6 8,192 25,000 
+Rules 
+You may use AI tools, but every number, log and design decision must come from your own system, and 
+you must be able to explain any line of your code in a viva. 
+Allowed stack. Anything in this table may be used. To use something not listed, ask on the LMS forum 
+first. 
+Table 6. Allowed stack 
+Purpose Allowed options Notes 
+Language and 
+runtime 
+Python 3.10 or later Notebooks are fine for exploring, 
+but final runs must start from 
+
+===== PAGE 6 =====
+
+Purpose Allowed options Notes 
+scripts in src/ using the 
+commands in your README. 
+Chat LLM A hosted API (OpenAI, Anthropic, Google Gemini, 
+Groq, Mistral; free tiers are fine) or a local model 
+through Ollama, llama.cpp or Hugging Face 
+Transformers (for example Llama, Qwen, Phi or 
+Gemma small models) 
+Use one model for all 
+configurations so comparisons 
+are fair. 
+NLU (intent 
+and entities) 
+regex, NLTK, spaCy, scikit-learn classifiers, a 
+Hugging Face zero-shot classifier (for example 
+facebook/bart-large-mnli), or the LLM with a 
+JSON-output prompt 
+Report which one you chose and 
+its accuracy (Task 2a). 
+Embeddings sentence-transformers models (for example all-
+MiniLM-L6-v2, bge, e5, gte) or an API embedding 
+endpoint (OpenAI, Cohere, Gemini) 
+State the model, its dimension 
+and its pooling. Use the same 
+model for indexing and queries. 
+Vector index 
+or store 
+NumPy (flat search), FAISS (flat or HNSW), 
+Chroma, Qdrant, pgvector 
+Store metadata (document ID, 
+version, user, date, status) 
+alongside each vector. 
+Sparse 
+retrieval and 
+fusion 
+Your own BM25 and RRF (required); scikit-learn 
+TfidfVectorizer and NLTK for tokenising, stop 
+words or stemming 
+See "You must write these 
+yourself". 
+Reranking 
+(optional) 
+sentence-transformers CrossEncoder (for 
+example cross-encoder/ms-marco-MiniLM-L-6-
+v2) 
+Report hit rate with and without 
+it if you use it. 
+Back-end 
+database and 
+tools 
+SQLite (sqlite3) or JSON files; requests for any 
+external API tool 
+The database write must be 
+confirmed by the user before it 
+runs. 
+Memory 
+storage 
+JSON, JSONL or SQLite for semantic records and 
+the episodic stream, plus your vector index 
+Everything must persist on disk 
+between Session A and Session B. 
+Token 
+counting 
+tiktoken, or the model's own tokenizer through 
+Hugging Face AutoTokenizer 
+Use the tokenizer that matches 
+your chat model where possible. 
+Evaluation 
+and plots 
+pandas, NumPy, matplotlib (seaborn optional) Plots must be drawn from your 
+log files. 
+Testing pytest Required for the BM25 and RRF 
+tests. 
+
+===== PAGE 7 =====
+
+Purpose Allowed options Notes 
+Interface 
+(optional) 
+Command line is enough; Gradio or Streamlit are 
+allowed for the demo 
+No marks for the interface itself. 
+ 
+You must write these yourself 
+• BM25 scoring and Reciprocal Rank Fusion. Your tests/ folder must show your BM25 
+reproducing the CS4 worked example (with the slide's inputs the score is 4.160; the slide shows 
+4.159 because it rounds each step) and your RRF reproducing the CS4 example ranking A, B, C, 
+D, then E and F tied, with k = 60. 
+• The episodic retrieval score (recency + importance + relevance) and the reflection step. 
+• The chunker, the state tracker, the dialogue manager and the memory write, update and delete 
+logic. 
+Not allowed for the core logic: LangChain or LlamaIndex retrievers, RAG chains or memory classes; 
+Mem0, Letta or Zep; rank_bm25 or a vector database's built-in hybrid search. You may use one of them 
+only as a cross-check, clearly labelled. 
+AI use policy 
+• Using AI assistants to write or debug code, or to draft knowledge-base documents, is allowed 
+and must be declared (Task 6b). 
+• Synthetic, edited or hand-typed logs and results are academic misconduct. Logs must be 
+produced by your code at run time. 
+• About 20% of students, chosen at random plus any flagged submission, will have a 10-minute 
+viva. Marks for a task can be revised if you cannot explain how your submission does it. 
+Mandatory logging. Every LLM, embedding and tool call writes one line to logs/calls.jsonl: 
+{"ts": "2026-11-20T14:03:11.482+05:30", "run_id": "r07", "config": "hybrid_mem", 
+"user": "U1", "session": "A", "turn": 12, "call_type": "chat", "model": 
+"llama3.1:8b", "input_tokens": 1432, "output_tokens": 118, "retrieved_tokens": 610, 
+"latency_ms": 2210} 
+• config is one of full, trim, summary (Task 2) and no_rag, hybrid, hybrid_sem, hybrid_mem 
+(Task 4). 
+• call_type is one of nlu, chat, summary, extract, importance, reflect, embed, tool, judge. 
+For a tool call, log 0 tokens and the measured latency. 
+• retrieved_tokens is the number of tokens of knowledge-base chunks, semantic memories and 
+episodic memories placed in the prompt (0 when nothing is retrieved). 
+What the log is and why it matters. The log is a record your code writes automatically while RecallBot 
+runs, one line per call; you never write it by hand. Your token plots (2b), comparison table (4a) and cost 
+estimate (5a) must be computed from it, and evaluators recompute those numbers from your log to 
+check the report. A missing, edited or inconsistent log triggers gate G1. 
+A small helper called after every LLM, embedding or tool call is enough: 
+
+===== PAGE 8 =====
+
+import json, time, datetime 
+ 
+RUN_ID = "r01"  # change for every run 
+ 
+def log_call(config, user, session, turn, call_type, model, 
+             input_tokens, output_tokens, retrieved_tokens, start): 
+    """Append one line to logs/calls.jsonl. `start` is time.time() taken just before 
+the call.""" 
+    rec = {"ts": datetime.datetime.now().astimezone().isoformat(), 
+           "run_id": RUN_ID, "config": config, "user": user, 
+           "session": session, "turn": turn, "call_type": call_type, 
+           "model": model, "input_tokens": input_tokens, 
+           "output_tokens": output_tokens, 
+           "retrieved_tokens": retrieved_tokens, 
+           "latency_ms": int((time.time() - start) * 1000)} 
+    with open("logs/calls.jsonl", "a", encoding="utf-8") as f: 
+        f.write(json.dumps(rec) + "\n") 
+Take token counts from the API response when it reports them (for example its usage field); otherwise 
+count them with your tokenizer. Never delete lines from the log: if a run goes wrong, start a new run_id 
+and say in the report which runs you used. 
+Two more result files are required: 
+• results/probe_results.csv with run_id, config, probe_id, category, expected, 
+answer, correct, judged_by (correct is 1 or 0; judged_by is manual or llm). 
+• results/hit_rate.csv with method, chunk_size, k, question_id, hit (method is dense, 
+bm25 or hybrid; hit is 1 or 0). 
+Tasks (20 marks) 
+Six tasks: 2 + 4 + 6 + 4 + 2 + 2 marks. Every claim in your report must point to a log line, a probe ID, a 
+question ID or a turn number. 
+Task 1. Test data and probes (2 marks) 
+Write three files. 
+data/test_conversation.json: a scripted conversation of at least 40 user turns, split into Session A 
+(turns 1 to 25) and Session B (turns 26 onward). It must contain: 
+• At least 8 user facts (preferences, constraints, profile details), each tagged with its turn number. 
+• At least 2 updates that override an earlier fact, and at least 1 explicit forget request. 
+• At least 3 events worth remembering as episodes (for example a booking, a complaint, a 
+decision) and at least 5 low-importance turns (small talk, thanks). 
+• One complete slot-filling task that ends with a confirmed database write. 
+• At least 2 follow-ups that depend on the dialogue state ("And for Saturday?") and at least 1 turn 
+that needs a clarification question. 
+• At least 5 knowledge-base questions spread across the sessions. 
+data/kb_questions.json: at least 25 retrieval test questions, each with its gold answer span and 
+document ID. Include at least 5 questions that contain an exact code or ID, at least 5 paraphrased 
+
+===== PAGE 9 =====
+
+questions that share no keyword with the answer span, and at least 2 whose answer is only in the newer 
+version of a document. 
+data/probes.json: at least 14 probes with expected answers, covering all seven categories below, plus 
+at least 2 probes for your twist. 
+Table 7. Probe categories 
+Category What it tests Example 
+R. Semantic recall A user fact stated once, many turns or a 
+session ago 
+"Which city did I say I am moving 
+to?" 
+U. Updated The latest value after an update "What is my budget now?" 
+F. Forgotten A deleted fact must not come back 
+from any memory 
+"What was my old address?" 
+(expected: says it does not know) 
+E. Episodic recall What happened in an earlier session, 
+and when 
+"What did I book last time, and 
+did I have a problem with it?" 
+K. Knowledge base A grounded answer that cites the right 
+chunk 
+"What is the refund window for 
+plan P-204?" 
+N. Not available Never said and not in the knowledge 
+base; the bot must not invent 
+"What is my pet's name?" 
+S. State follow-up Resolved from the dialogue state "And for Saturday?" 
+Task 2. Dialogue pipeline and short-term memory (4 marks) 
+Build the pipeline from the problem statement, then run Session A with three short-term memory 
+strategies, using the same system prompt, model and decoding settings: 
+1. full: the whole history in every prompt. 
+2. trim: only the last k turns (k from your variant). 
+3. summary: a rolling summary written by a second LLM call, plus the last 2 turns. 
+The state tracker stays on in all three, so differences come from the history strategy. 
+• (a) Pipeline, prompts and procedural memory (1.5). A diagram of NLU, state tracker, dialogue 
+manager, tools, memory stores and NLG, labelled with your own function names. Report your 
+NLU approach (rules, zero-shot, LLM or hybrid) and its accuracy on at least 20 labelled 
+utterances. List your state-tracker fields. Keep your system prompt and your task's step list as 
+versioned files in skills/ (procedural memory) and explain how the prompt covers persona, 
+scope, error handling and output format. State your decoding settings for task turns and for 
+open turns, and why. 
+• (b) Short-term memory strategies (1). One plot of input tokens per turn for all three strategies, 
+drawn from calls.jsonl, and the total tokens including the extra summary calls. 
+
+===== PAGE 10 =====
+
+• (c) Context-handling analysis (1.5). Probe accuracy for each strategy on the Session A probes. 
+For each strategy, name one failed probe and the turn where the information was lost or 
+distorted. State the first turn whose facts trim can no longer recall. For each state follow-up and 
+clarification case, show the state that resolved it or the clarification question asked. Show that 
+the database write ran only after confirmation. 
+Task 3. Retrieval and long-term memory (6 marks) 
+• (a) Chunking and indexing (1). Chunk your knowledge base at two sizes (for example 128 and 
+512 tokens) with 10 to 20% overlap, counted with your tokenizer. Embed with your stated 
+model and pooling. Store document ID, section and version or date as metadata. Choose a flat 
+or an HNSW index and justify it for your corpus size. 
+• (b) Dense, BM25 and hybrid (1.5). Using your own BM25 and RRF (with the passing tests), 
+report hit rate@1, @3 and @5 for dense, BM25 and hybrid at both chunk sizes on 
+kb_questions.json, with separate rows for the code questions and the paraphrased questions. 
+Explain one question that hybrid fixed and one it did not, with the ranked lists. 
+• (c) Semantic memory of the user (1). An extraction step turns user turns into keyed records 
+(user, key, value, source_turn, date, status), like the CS5 fact notebook; filler turns 
+produce no record. Report extraction precision and recall against the facts planted in Task 1. An 
+update marks the old record superseded, so a stale fact cannot win (the same fix as the stale-
+chunk failure in CS4). A forget request deletes the record from the store and the index. 
+• (d) Episodic memory (1). Keep a memory stream: time-stamped entries of what happened, each 
+with an importance score from 1 to 10 (rule-based or LLM-rated). Retrieve episodes by a score 
+that combines recency (state your decay), importance and relevance (cosine similarity), as in the 
+Generative Agents example from CS5. Compare at least two weightings on your E probes and 
+justify the one you keep. At the end of Session A, write at least one reflection back into the 
+stream and show Session B using it. A forget request must also remove or redact episodes and 
+reflections that mention the forgotten fact; show this after a restart, together with 3(c). 
+• (e) Context engineering (0.5). For one Session B turn, give a context-assembly table in the style 
+of the CS5 example: system and instructions, tools, long-term memory, conversation history, 
+retrieved knowledge and current task, with measured tokens, the memory type of each part and 
+whether it is model-native or external. The total must fit your variant's context window with 
+room for the reply. Show your grounding rules, the cited ID for every chunk or memory used, 
+and the exact fallback sentence when nothing relevant is found. 
+• (f) Twist (1). Implement your twist's requirement and report its probes, passing or failing, with 
+an explanation. 
+Task 4. Evaluation and error analysis (4 marks) 
+• (a) Ablation and dialogue quality (1.5). Run Sessions A and B with four configurations that add 
+one memory type at a time: no_rag (short-term memory only), hybrid (plus knowledge base), 
+hybrid_sem (plus semantic memory) and hybrid_mem (plus episodic memory). Give one table 
+with accuracy per probe category, mean input tokens per turn, median latency and total tokens; 
+every number must be reproducible from your logs. Rate 15 Session B replies per configuration 
+from 1 to 5 on the CS1 rubric (coherence, relevance, groundedness, safety). If you use an LLM 
+judge, check it against your own ratings on at least 10 replies and report the agreement. 
+
+===== PAGE 11 =====
+
+• (b) Error analysis (1.5). Take 3 failed probes from hybrid_mem and trace each to its stage: a 
+memory-write fault (fact not extracted, wrong importance), a retrieval fault (the right chunk or 
+memory was not retrieved, or a stale one was), a prompt fault (the right text was in the prompt 
+but ignored), an NLU or state fault, or a budget cut. Show the evidence (ranked list with scores, 
+prompt excerpt, dialogue state) and the fix at the right stage. 
+• (c) Surprise probes (1). Five extra probes will be published on the LMS on 24/11/2026. Adapt 
+them to your domain, run them on hybrid_mem and report the raw results, failures included. If 
+you change your system afterwards, report the before and after results separately. 
+Task 5. Cost and scale (2 marks) 
+• (a) Token economics (1). For your variant's daily users, assume one conversation per user per 
+day with the number of turns in your test conversation. From your measured tokens per turn, 
+estimate the monthly cost of trim and hybrid_mem using the CS3 price table (name the model 
+row you used), with and without prompt caching of the fixed prefix (system prompt and few-
+shot examples). Say whether your prefix reaches the minimum cacheable length, and what you 
+would change if it does not. 
+• (b) Vector index sizing (1). Estimate the number of vectors after one year (knowledge-base 
+chunks plus semantic and episodic memories for all users) and the memory needed for a flat 
+float32 index and for HNSW with M = 16, using the CS3 per-vector formula. Then measure on 
+your own machine: query latency of flat vs HNSW on at least 100,000 vectors (pad your index 
+with random vectors if needed), and HNSW recall against flat on your kb_questions. 
+Recommend an index and its M and ef_search. 
+Task 6. Demo video and AI-use declaration (2 marks) 
+• (a) Video (1.5). At most 5 minutes, your own voice, screen recording. Show: Session A with a 
+confirmed booking, a process restart, Session B recalling a semantic fact and an episode from 
+Session A, a forget request honoured after restart, one knowledge-base answer with its cited 
+chunk, one failure case, and a walkthrough of your RRF or episodic scoring function. 
+• (b) AI-use declaration (0.5). One page: the tools you used, what for, and one specific case where 
+the AI's suggestion was wrong or unsuitable, how you found out, and what you changed. 
+Suggested plan 
+Two weeks is enough if you build in this order and keep logging on from the first run. Reuse any demo 
+code shown in class where it helps. 
+1. 14 to 16 Nov: data first. Write the knowledge base, kb_questions.json, the test conversation 
+and the probes (Task 1). Everything else is measured against these. 
+2. 16 to 18 Nov: retrieval. Chunker, embeddings, your BM25 and RRF with passing tests, hit 
+rate@k table (Task 3a, 3b). This part needs no LLM calls. 
+3. 18 to 21 Nov: pipeline and short-term memory. NLU, state tracker, dialogue manager, tools, 
+skills/ files, and the three history strategies with logging (Task 2). 
+4. 21 to 24 Nov: long-term memory. Semantic records with update and forget, the episodic stream 
+with importance, scoring and reflection, and the context-assembly table (Task 3c to 3f). 
+
+===== PAGE 12 =====
+
+5. 24 to 26 Nov: evaluation. Run the surprise probes as soon as they are released, then the four-
+configuration ablation, rubric ratings and error analysis (Task 4). 
+6. 26 to 28 Nov: write-up. Cost and index sizing (Task 5), video and declaration (Task 6), report, 
+final check of the submission list below. 
+Deliverables 
+Submit one zip named <BITS_ID>_V<variant>_MP1.zip on the LMS by 28/11/2026, 11:59 pm, with 
+this structure: 
+<BITS_ID>_V<nn>_MP1/ 
+  README.md                  setup and the exact commands to reproduce every run 
+  requirements.txt 
+  src/                       your code 
+  skills/                    system prompt and task step list (procedural memory) 
+  tests/                     BM25 and RRF tests against the CS4 worked examples 
+  data/kb/                   knowledge-base documents 
+  data/test_conversation.json 
+  data/kb_questions.json 
+  data/probes.json 
+  data/surprise_probes.json 
+  db/                        the SQLite or JSON back-end 
+  index/                     knowledge-base vector index 
+  memory/                    semantic records, episodic stream and reflections after 
+Session B of hybrid_mem 
+  logs/calls.jsonl           every LLM, embedding and tool call, untouched 
+  results/probe_results.csv 
+  results/hit_rate.csv 
+  results/plots/ 
+  report.pdf                 at most 8 pages plus appendices 
+  video_link.txt             link to the video, viewable by anyone with the link 
+Report structure (page limits are guides; main body at most 8 pages): 
+1. Variant, LLM, embedding model and pooling, index type and hardware (half a page). 
+2. Architecture diagram: NLU, state tracker, dialogue manager, tools, retrieval, the four memory 
+types and NLG (1 page). 
+3. Tasks 1 to 5, in order, using the sub-part labels, for example 3(b) (6 pages). 
+4. Limitations and what you would change with one more week (half a page). 
+5. Appendix A: AI-use declaration. Appendix B: your prompts (system, RAG, extraction, 
+importance, reflection, summary, judge). 
+Rubric 
+The rubric gives 20 marks across 17 criteria; most criteria need evidence from your own runs, so working 
+code alone earns well under half the marks. Half marks are allowed within each band. 
+
+===== PAGE 13 =====
+
+Table 8. Marking rubric 
+Criterion Max Full marks Partial Little or none 
+1. Test data 
+and probes 
+2 All three files complete; probes cover 
+all 7 categories plus 2 twist probes; kb 
+questions include code, paraphrase 
+and new-version cases with gold spans; 
+realistic for the domain (2) 
+One element 
+missing, or most 
+probes 
+answerable from 
+the last few turns 
+(1 to 1.5) 
+Generic, not 
+domain-
+specific, or 
+fewer than 8 
+probes or 15 
+kb questions (0 
+to 0.5) 
+2(a) Pipeline, 
+prompts and 
+procedural 
+memory 
+1.5 Diagram matches the code; NLU 
+accuracy measured; state fields listed; 
+skills/ files loaded at run time; 
+prompt covers persona, scope, error 
+handling and format; decoding choices 
+justified (1.5) 
+Diagram generic, 
+NLU not 
+measured, or 
+prompt or 
+decoding not 
+justified (0.75 to 
+1) 
+Single prompt 
+with no state 
+tracker or tools 
+(0 to 0.5) 
+2(b) Short-
+term 
+memory 
+strategies 
+1 All three strategies work; plot drawn 
+from calls.jsonl with summary-call 
+overhead in the totals (1) 
+One strategy 
+flawed, or plot 
+not traceable to 
+logs (0.5) 
+Missing (0) 
+2(c) Context-
+handling 
+analysis 
+1.5 Accuracy per strategy; each failure tied 
+to a turn; trim cut-off turn stated; 
+follow-ups and clarification traced to 
+the state; write confirmed first (1.5) 
+Accuracies given, 
+explanations 
+generic, or state 
+handling not 
+traced (0.75 to 1) 
+No accuracies 
+or no failure 
+analysis (0 to 
+0.5) 
+3(a) 
+Chunking 
+and indexing 
+1 Two chunk sizes with token-counted 
+overlap; model and pooling stated; 
+metadata stored; index choice justified 
+(1) 
+One chunk size, or 
+overlap or 
+metadata missing 
+(0.5) 
+Whole 
+documents 
+embedded (0) 
+3(b) Dense, 
+BM25 and 
+hybrid 
+1.5 Own BM25 and RRF with passing tests; 
+hit rate@1/3/5 for 3 methods x 2 sizes, 
+with code and paraphrase rows; one 
+fixed and one unfixed case explained 
+with ranked lists (1.5) 
+Tests missing or 
+failing, a method 
+or size missing, or 
+no breakdown by 
+question type 
+(0.75 to 1) 
+Only one 
+retrieval 
+method, or hit 
+rate not 
+computed (0 
+to 0.5) 
+3(c) 
+Semantic 
+memory 
+1 Keyed records with metadata; filler 
+produces nothing; precision and recall 
+reported; update supersedes; forget 
+deletes from store and index (1) 
+Works, but 
+updates duplicate, 
+no 
+precision/recall, 
+Raw turns 
+stored, or 
+memory held 
+in RAM (0) 
+
+===== PAGE 14 =====
+
+Criterion Max Full marks Partial Little or none 
+or forget 
+incomplete (0.5) 
+3(d) Episodic 
+memory 
+1 Stream with importance; score 
+combines recency decay, importance 
+and relevance; two weightings 
+compared; reflection written and used 
+in Session B; forgotten fact removed 
+from episodes after restart (1) 
+Stream works but 
+one signal only, 
+no reflection, or 
+forgotten fact 
+leaks (0.5) 
+Not 
+implemented 
+(0) 
+3(e) Context 
+engineering 
+0.5 Assembly table with measured tokens, 
+memory type and home for each part, 
+fits the window; grounding rules, cited 
+IDs, fallback sentence (0.5) 
+One of the two 
+parts weak (0.25) 
+Missing (0) 
+3(f) Twist 1 Twist requirement works; twist probes 
+reported with explanation (1) 
+Attempted, partly 
+working (0.5) 
+Not attempted 
+(0) 
+4(a) Ablation 
+and dialogue 
+quality 
+1.5 Four configurations, all columns, 
+numbers match the logs; contribution 
+of each memory type discussed; rubric 
+scores with judge agreement reported 
+(1.5) 
+A configuration, 
+column or the 
+rubric missing, or 
+small mismatches 
+with logs (0.75 to 
+1) 
+Numbers 
+cannot be 
+found in the 
+logs (0 to 0.5) 
+4(b) Error 
+analysis 
+1.5 Three failures traced to the right stage, 
+each with ranked list, prompt excerpt 
+and state, and a fix at that stage (1.5) 
+Classified but 
+evidence thin, or 
+fix at the wrong 
+stage (0.75 to 1) 
+Vague or 
+generic failures 
+(0 to 0.5) 
+4(c) Surprise 
+probes 
+1 All 5 adapted and run; raw results 
+honest; before/after shown if the 
+system changed (1) 
+Some run, or 
+results not raw 
+(0.5) 
+Not done (0) 
+5(a) Token 
+economics 
+1 Monthly cost for both configurations 
+with and without caching, from 
+measured tokens, named price row, 
+cacheable-length check (1) 
+One configuration 
+or the caching 
+case missing, or 
+assumed tokens 
+(0.5) 
+Missing or 
+numbers 
+without 
+working (0) 
+5(b) Vector 
+index sizing 
+1 Vector count and memory for flat and 
+HNSW by formula; measured latency 
+and HNSW recall; justified M and 
+ef_search (1) 
+Formula only, or 
+measurement 
+only (0.5) 
+Missing (0) 
+
+===== PAGE 15 =====
+
+Criterion Max Full marks Partial Little or none 
+6(a) Demo 
+video 
+1.5 All seven items shown; own voice; 
+clear explanation of own RRF or 
+episodic scoring code (1.5) 
+Some items 
+missing, or 
+explanation 
+shallow (0.75 to 1) 
+No voice-over, 
+or slides only 
+(0 to 0.5) 
+6(b) AI-use 
+declaration 
+0.5 A specific wrong AI suggestion, how it 
+was found and what changed (0.5) 
+Generic 
+statement (0.25) 
+Missing (0) 
+Total 20    
+Integrity gates. These apply before rubric marks are added up. 
+Table 9. Integrity gates 
+Gate Condition Effect 
+G1 calls.jsonl or hit_rate.csv missing, edited, or 
+inconsistent with numbers in the report 
+2(b), 2(c), 3(b), 4(a) and 4(b) capped at 
+half marks; suspected fabrication 
+referred under the institute's academic 
+integrity policy 
+G2 A banned library does the core retrieval, fusion or 
+memory logic 
+Task 3 capped at 2 of 6 
+G3 Session B is not a separate process (memory held 
+in RAM) 
+3(c), 3(d) and 4(a) capped at half marks 
+G4 Built for a variant other than the one allocated 0 for Tasks 1, 3(f) and 5 
+G5 In the viva, the student cannot explain how the 
+submission does a task 
+Marks for that task revised in line with 
+the viva 
+Submission checklist 
+Tick every item before you upload; a missing item usually triggers a gate. 
+• ☐ The zip is named <BITS_ID>_V<nn>_MP1.zip and matches your allocated variant. 
+• ☐ README.md reproduces every run from a fresh environment. 
+• ☐ python -m pytest tests/ passes, and the tests use the CS4 BM25 and RRF example 
+numbers. 
+• ☐ logs/calls.jsonl comes from your runs and is unedited; every configuration in your report 
+has log lines. 
+• ☐ results/probe_results.csv and results/hit_rate.csv match the tables in the report. 
+• ☐ Session B ran in a new process; memory/ holds the store as it stands after Session B of 
+hybrid_mem. 
+• ☐ The surprise probes are in data/surprise_probes.json, with raw results in the report. 
+• ☐ The report is at most 8 pages plus appendices and labels every sub-part, for example 3(d). 
+
+===== PAGE 16 =====
+
+• ☐ The video link opens for anyone with the link and the video is at most 5 minutes. 
+• ☐ The AI-use declaration is in Appendix A. 
+FAQ 
+1. Can I use ChatGPT, Claude or Copilot? Yes, for code, debugging and drafting knowledge-base 
+documents. Declare it in Appendix A. You still need to explain every part of your submission in 
+the video and, if selected, in the viva. 
+2. Which LLM should I use? Do I need a GPU? Any chat model works: a free API tier, or a small 
+local model through Ollama on CPU. Use the same model for all configurations so comparisons 
+are fair. No GPU is needed. 
+3. Can I use LangChain or LlamaIndex? Not for retrieval, fusion or memory. You may use an LLM 
+SDK, an embedding library and a vector index such as FAISS. The point of the project is that you 
+write BM25, RRF, the episodic score and the memory logic yourself. 
+4. How do I mark probe answers? By hand, or with an LLM judge that you check by hand on at 
+least 20 judgements; report the agreement rate. Record judged_by for every row. 
+5. My system fails some probes. Will I lose marks? Not for honest failures. A failure traced to the 
+right stage with evidence earns the error-analysis marks. Perfect results that the logs do not 
+support are penalised under gate G1. 
+6. How should I rate importance for episodic memory? Either a rule (for example bookings and 
+complaints score high, small talk scores low) or an LLM prompt that returns a number from 1 to 
+10, as in the CS5 memory-stream example. Explain your choice and log the calls as importance. 
+7. Can I generate the knowledge base with AI? Yes, as long as it fits your domain and contains the 
+required codes, old and new versions and enough detail for 25 questions. Check it for 
+contradictions; your probes depend on it. 
+8. What happens if my video runs over 5 minutes? Only the first 5 minutes are marked. 

@@ -1,0 +1,12 @@
+Hi is refused: "I can only help with IT issues." Nothing is stored.
+I sit at the Pune office. stores location.
+My laptop is LAP-T14G3. stores asset_id.
+Where do I sit? and Which laptop do I use? read those two back.
+I have moved from Pune to Hyderabad. supersedes Pune. The next office question must say Hyderabad, not Pune.
+What does ERR-VPN-809 mean? hits the VPN page through search_kb.
+Book me a flight to Delhi. is refused and does not search.
+Booking is five turns: request, office, day, time, then "Shall I book that visit?" Nothing is written until you say Yes.
+A second visit answered with No does not book, and a stray Yes afterwards says there is nothing waiting.
+New session, same user: the office is still known. The day and time are not.
+Switch to U2. Asking where the other user sits must not reveal Hyderabad or the laptop. U2 stating Bengaluru and LAP-MBP14 does not change U1.
+Forget Hyderabad from the forget box. U1 no longer has an office. U2 still has Bengaluru.
