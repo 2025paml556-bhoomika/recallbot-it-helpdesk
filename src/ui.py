@@ -99,6 +99,21 @@ def _table(name: str) -> list[dict]:
         conn.close()
 
 
+def _changed_slot(decision: dict) -> int | None:
+    """The slot this turn wrote, when the turn updated a visit rather than inserting one.
+
+    A reschedule keeps the same slot_id. The page uses it to mark that row,
+    so the updated day is not read as a second booking beside the chat history.
+    """
+    if decision.get("name") != "update_slot":
+        return None
+    result = decision.get("result")
+    if not isinstance(result, dict):
+        return None
+    slot_id = result.get("slot_id")
+    return slot_id if isinstance(slot_id, int) else None
+
+
 def turn(user: str, session: str, text: str) -> dict:
     """One user message through the real agent. Recall is captured before write."""
     current = get_session(user, session)
@@ -126,6 +141,7 @@ def turn(user: str, session: str, text: str) -> dict:
             ],
         },
         "state": snapshot(user),
+        "changed_slot": _changed_slot(decision),
     }
 
 
@@ -279,8 +295,10 @@ PAGE = """<!DOCTYPE html>
   .card .tag.off { background: #f3d6d0; }
   .empty { color: #9a9084; font-style: italic; }
   .error { color: #8d2d22; }
-  table { width: 100%; border-collapse: collapse; font: 12px/1.3 ui-monospace, monospace; }
-  td { padding: 3px 4px; border-bottom: 1px solid #f0e9de; vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; font: 12px/1.35 ui-monospace, monospace; }
+  td { padding: 4px 6px; border-bottom: 1px solid #f0e9de; vertical-align: top; }
+  tr.changed td { background: #f4eccf; }
+  td.when { white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -356,6 +374,8 @@ function note(html) {
   log.scrollTop = log.scrollHeight;
 }
 
+let changedSlot = null;
+
 function renderState(state) {
   const facts = $("facts");
   facts.innerHTML = "";
@@ -378,11 +398,25 @@ function renderState(state) {
     episodes.appendChild(div);
   }
   const rows = $("rows");
-  const all = state.tickets.map(r => ["ticket", r.ticket_id, r.owner_user, r.issue_type])
-    .concat(state.bookings.map(r => ["booking", r.slot_id, r.owner_user, r.location + " " + r.date]));
+  const tickets = state.tickets.map(r => ({
+    kind: "ticket",
+    id: r.ticket_id,
+    detail: r.issue_type + " · " + r.status,
+    changed: false,
+  }));
+  const bookings = state.bookings.map(r => ({
+    kind: "booking",
+    id: r.slot_id,
+    detail: (r.date || "day not set") + " " + (r.time || "") + " · " + (r.location || ""),
+    changed: changedSlot !== null && r.slot_id === changedSlot,
+  }));
+  const all = tickets.concat(bookings);
   if (!all.length) { rows.innerHTML = '<div class="empty">No rows.</div>'; return; }
-  rows.innerHTML = "<table>" + all.map(cells =>
-    "<tr>" + cells.map(c => "<td>" + c + "</td>").join("") + "</tr>").join("") + "</table>";
+  rows.innerHTML = "<table>" + all.map(row =>
+    '<tr class="' + (row.changed ? "changed" : "") + '">' +
+    "<td>" + row.kind + (row.changed ? " · updated" : "") + "</td>" +
+    "<td>" + row.id + "</td>" +
+    "<td>" + row.detail.trim() + "</td></tr>").join("") + "</table>";
 }
 
 function renderRecalled(recalled, slots) {
@@ -429,6 +463,7 @@ $("composer").addEventListener("submit", async (event) => {
       " · turn " + data.turn + " · action " + data.action +
       (data.tool ? " (" + data.tool + ")" : ""));
     renderRecalled(data.recalled, data.slots);
+    changedSlot = data.changed_slot;
     renderState(data.state);
   } catch (err) {
     note('<span class="error">' + err.message + "</span>");

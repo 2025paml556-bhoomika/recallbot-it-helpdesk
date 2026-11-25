@@ -1121,6 +1121,75 @@ def test_a_move_replaces_the_office_a_later_session_reads(monkeypatch, tmp_path)
     assert [fact["value"] for fact in asked["recalled"]["facts"]] == ["Hyderabad"]
 
 
+def test_located_and_asset_id_are_recalled_end_to_end(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "I sit at the Hyderabad office.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Hyderabad office"},
+                },
+                "My laptop is LAP-T14G3.": {
+                    "intent": "provide_info",
+                    "slots": {"asset_id": "LAP-T14G3"},
+                },
+                "Where am I located": {"intent": "recall_fact"},
+                "Whats my asset Id ?": {"intent": "recall_fact"},
+            }
+        ),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    first.ingest("I sit at the Hyderabad office.")
+    first.ingest("My laptop is LAP-T14G3.")
+
+    second = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
+    place = "Where am I located"
+    second.ingest(place)
+    assert second.reply(place, second.decide(place)) == "You sit at Hyderabad office."
+    asset = "Whats my asset Id ?"
+    second.ingest(asset)
+    assert second.reply(asset, second.decide(asset)) == "You use LAP-T14G3."
+
+
+def test_a_past_event_is_read_from_the_episode_log(monkeypatch, tmp_path):
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"What did we do last time?": {"intent": "out_of_scope"}}),
+    )
+    memory = Memory("U1", "B", root=tmp_path)
+    memory.episodic.add(
+        "U1",
+        "Raised TCK-1042 for the laptop screen.",
+        "ticket",
+        session="A",
+    )
+    session = Session("U1", "B", memory=memory)
+    text = "What did we do last time?"
+    labelled = session.ingest(text)
+    assert labelled["recalled"]["episodes"]
+    decision = session.decide(text)
+    assert decision["action"] == ACTION_TOOL
+    assert decision["name"] == "recall_episode"
+    assert session.reply(text, decision) == "Last time, Raised TCK-1042 for the laptop screen."
+
+    other = Session("U2", "B", memory=Memory("U2", "B", root=tmp_path))
+    other.ingest(text)
+    missed = other.decide(text)
+    assert missed["action"] == ACTION_NONE
+    # No model call: the miss is the fixed line, not a reworded refusal.
+    def fail_chat(*args, **kwargs):
+        raise AssertionError("a memory miss must not call the chat model")
+
+    monkeypatch.setattr("src.agent.chat", fail_chat)
+    assert other.reply(text, missed) == REPLIES["recall_episode"]
+
+
 def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",

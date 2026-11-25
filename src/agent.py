@@ -75,6 +75,8 @@ REPLIES = {
     "fix_issue": "That is already raised.",
     # Said when the user asks about themselves and nothing stored matches.
     "recall_fact": "I don't have that stored for you.",
+    # Said when they ask what happened before and no episode is close enough.
+    "recall_episode": "I don't have a record of that.",
 }
 
 # How a stored fact is read back. The key is the slot name, not the sentence
@@ -84,6 +86,15 @@ FACT_REPLIES = {
     "location": "You sit at {value}.",
     "asset_id": "You use {value}.",
 }
+
+# A past event is not a standing fact. "What did we do last time?" is about
+# an episode, not the office or the laptop, so it is not scored as either.
+_PAST_EVENT = re.compile(
+    r"\b(?:last time|previously|earlier|before)\b"
+    r"|\bwhat did (?:we|i|you)\b"
+    r"|\bwhat happened\b",
+    re.IGNORECASE,
+)
 
 # The reply instructions live in skills/ and are read from disk on each
 # reply, so editing the file changes the next session without a code change.
@@ -505,7 +516,19 @@ class Session:
             # standing fact, not a yes, so it does not confirm the visit.
             return self._advance_booking()
 
-        if intent == "recall_fact":
+        if intent == "recall_fact" or self._asks_for_episode(text):
+            # A past event lives in the episode log, not in the fact store
+            # and not in the ticket table. "What did we do last time?" is
+            # often labelled out_of_scope, so the wording is checked too.
+            if self._asks_for_episode(text):
+                episode = self._episode_for(text)
+                if episode is None:
+                    return {"action": ACTION_NONE}
+                return self._tool(
+                    "recall_episode",
+                    episode,
+                    {"text": episode.get("text"), "type": episode.get("type")},
+                )
             # Answered from memory, not from the knowledge base. A question
             # states no new fact, so nothing is written on this turn either.
             fact = self._fact_for(text)
@@ -619,6 +642,17 @@ class Session:
         )
         return self._tool("get_ticket", found, {"ticket_id": ticket_id, "user": self.user})
 
+    def _asks_for_episode(self, text: str) -> bool:
+        """True when the sentence asks what happened before, not for a fact.
+
+        "Where do I sit?" is a standing fact. "What did we do last time?"
+        is an episode. A ticket or a booking still goes to the helpdesk
+        tables, so those sentences are not treated as episodes.
+        """
+        if self._asks_for_record(text):
+            return False
+        return _PAST_EVENT.search(text or "") is not None
+
     def _fact_for(self, text: str) -> dict | None:
         """The stored fact this question is about, or None.
 
@@ -630,6 +664,17 @@ class Session:
         if not facts:
             return None
         return max(facts, key=lambda row: row.get("score", 0))
+
+    def _episode_for(self, text: str) -> dict | None:
+        """The past event this question is about, or None.
+
+        load() already dropped other users and episodes below the cosine
+        cut-off, then ranked what remained. The first one is the answer.
+        """
+        episodes = self.recalled.get("episodes") or []
+        if not episodes:
+            return None
+        return episodes[0]
 
     def _raise_current_issue(self, text: str) -> dict:
         """Insert the ticket for the fault this session is holding."""
@@ -729,6 +774,12 @@ class Session:
             said = template.format(key=result["key"], value=result["value"])
             self._log_exchange(text, said)
             return said
+        if name == "recall_episode":
+            # The episode text is already the sentence. The model is not
+            # asked to rephrase it, for the same reason a fact is not.
+            said = f"Last time, {result['text']}"
+            self._log_exchange(text, said)
+            return said
         if name == "search_kb":
             shown = self._passages(result)
         elif name == "get_ticket":
@@ -790,6 +841,13 @@ class Session:
         # Only the hello gets the greeting line, so the refusal stays a refusal.
         if intent == "out_of_scope" and is_greeting(text):
             intent = "greeting"
+        # "What did we do last time?" with nothing stored is not a refusal
+        # of a payroll question. It is a memory miss.
+        if self._asks_for_episode(text) and intent in ("out_of_scope", "recall_fact"):
+            # Returned as written. An open turn is otherwise reworded by the
+            # model, and a memory miss has no fact for it to rephrase.
+            self._log_exchange(text, REPLIES["recall_episode"])
+            return REPLIES["recall_episode"]
         # "ok" after a written visit is thanks. The same word with nothing
         # booked stays a short acknowledgement, not a refusal and not
         # "there is nothing waiting to book".
