@@ -26,7 +26,7 @@ import re
 from src.history import STRATEGIES, window_text
 from src.llm import chat
 from src.memory import Memory
-from src.nlu import SLOT_NAMES, _SAME_TIME, understand
+from src.nlu import SLOT_NAMES, _SAME_TIME, forget_request, understand
 from src.search_kb import RELEVANCE_THRESHOLD
 from src.tools import (
     NOT_FOUND,
@@ -78,6 +78,8 @@ REPLIES = {
     "recall_fact": "I don't have that stored for you.",
     # Said when they ask what happened before and no episode is close enough.
     "recall_episode": "I don't have a record of that.",
+    # Said after a "please forget" turn has deleted the fact.
+    "forget": "I've forgotten that.",
 }
 
 # How a stored fact is read back. The key is the slot name, not the sentence
@@ -157,6 +159,15 @@ OPEN_TOP_P = 0.9
 # Shown to the model when retrieval found nothing above the relevance cut-off.
 # The model is not handed a weak passage it might quote as if it were an answer.
 NO_PASSAGE = "Nothing relevant was found in the knowledge base."
+
+# The sentence a question gets when neither the knowledge base nor this
+# user's memory has anything relevant. It is returned as written. The model
+# is not called, because a call is what invents an answer.
+FALLBACK = "I don't know."
+
+# A citation the reply already carries. Grounding adds one only when the
+# model left it off, and never a second copy.
+_CITATION = re.compile(r"\[(?:mem:[A-Za-z0-9._-]+|[A-Za-z0-9._-]+#[A-Za-z0-9_.:@-]+)\]")
 
 # Slots a later message is allowed to refresh. issue_type and error_code
 # describe the fault being discussed, so a booking answer must not wipe them.
@@ -256,6 +267,48 @@ _RESCHEDULE = re.compile(
 )
 
 
+def chunk_cite(hit: dict) -> str:
+    """The citation for one retrieved chunk: [doc_id#chunk_id].
+
+    chunk_id already names the document, the version and the piece. The
+    doc_id is repeated in front so the form matches [doc_id#chunk].
+    """
+    return f"[{hit.get('doc_id')}#{hit.get('chunk_id')}]"
+
+
+def memory_cite(memory_id: str | None) -> str:
+    """The citation for one fact or episode: [mem:id]."""
+    return f"[mem:{memory_id}]"
+
+
+def _with_citation(text: str, cite: str) -> str:
+    """Append a citation when the sentence does not already carry one."""
+    body = (text or "").rstrip()
+    if cite in body:
+        return body
+    return f"{body} {cite}"
+
+
+def ground_citations(text: str, allowed: list[str]) -> str:
+    """Keep only citations that name a passage the reply was shown.
+
+    The model is told to cite, and it sometimes cites a document it was not
+    given. Those tokens are removed. When none of the allowed citations
+    survived, the first allowed one is appended, so the reply still names
+    the passage it was written from.
+    """
+    body = text or ""
+    kept = [cite for cite in allowed if cite and cite in body]
+    for found in _CITATION.findall(body):
+        if found not in allowed:
+            body = body.replace(found, "")
+    body = re.sub(r"[ \t]{2,}", " ", body).strip()
+    body = re.sub(r"\s+([.!?])", r"\1", body)
+    if not kept and allowed:
+        body = _with_citation(body, allowed[0])
+    return body
+
+
 def _jsonable(value):
     """A tool result safe to write into the session JSON file.
 
@@ -313,6 +366,8 @@ class Session:
         # Facts written by the latest ingest. The thanks line is only said
         # when this is not empty, so "I'll remember that" matches a real row.
         self.facts_written: list[dict] = []
+        # Set when this turn asked to delete a fact. reply() reads it.
+        self.forgotten: dict | None = None
 
     def ingest(self, text: str) -> dict:
         """Label one message and merge any new slot values into this session.
@@ -329,6 +384,31 @@ class Session:
         # them into the session file. A new turn starts empty.
         self.calls = []
         self.tool_call = None
+        self.forgotten = None
+        # "Please forget my personal phone number" is a deletion, not a fact
+        # and not a question. It is handled here so the model cannot label
+        # it as provide_info and store the number a second time.
+        requested = forget_request(text)
+        if requested is not None:
+            self.forgotten = self.memory.forget_request(requested["key"], requested["value"])
+            self.facts_written = []
+            self.history.append({
+                "turn": self.turn,
+                "text": text,
+                "intent": "forget",
+                "source": "rule",
+                "message_slots": {},
+                "slots": self.slots_so_far(),
+            })
+            return {
+                "intent": "forget",
+                "source": "rule",
+                "message_slots": {},
+                "slots": self.slots_so_far(),
+                "recalled": self.recalled,
+                "turn": self.turn,
+                "forgotten": self.forgotten,
+            }
         understood = understand(
             text,
             user=self.user,
@@ -365,6 +445,7 @@ class Session:
             understood["slots"],
             self.turn,
         )
+        self._note_decision(text, understood["intent"])
         return {
             "intent": understood["intent"],
             "source": understood["source"],
@@ -373,6 +454,26 @@ class Session:
             "recalled": self.recalled,
             "turn": self.turn,
         }
+
+
+    def _note_decision(self, text: str, intent: str) -> None:
+        """Store a choice the user just made, such as a refresh over a repair.
+
+        It is an episode, not a standing fact. The next session asks what was
+        decided, and that question reads episodes. A profile sentence is not
+        a decision.
+        """
+        if intent != "provide_info":
+            return
+        if not re.search(r"\brather than\b|\bgo ahead with the refresh\b", text, re.IGNORECASE):
+            return
+        self.memory.remember_event(
+            text,
+            "event",
+            self.turn,
+            run_id=self.run_id,
+            config=self.strategy,
+        )
 
     def slots_so_far(self) -> dict[str, str | None]:
         """A copy of the carried slots. Callers cannot mutate the session."""
@@ -514,6 +615,10 @@ class Session:
             raise RuntimeError("decide() needs ingest() to have run first")
         intent = self.history[-1]["intent"]
 
+        if intent == "forget":
+            # The deletion already happened in ingest(). Nothing to call.
+            return {"action": ACTION_NONE}
+
         if intent == "ask_kb":
             # "12 PM" after "What time of day works?" is the open slot, not a
             # knowledge-base question. Search only when it filled nothing the
@@ -633,6 +738,9 @@ class Session:
                         f"at {booked['time']}."
                     ),
                     "booking",
+                    self.turn,
+                    run_id=self.run_id,
+                    config=self.strategy,
                 )
                 return self._tool(
                     tool_name,
@@ -754,6 +862,9 @@ class Session:
         self.memory.remember_event(
             f"Raised {ticket['ticket_id']} for {ticket['issue_type']}.",
             "ticket",
+            self.turn,
+            run_id=self.run_id,
+            config=self.strategy,
         )
         return ticket
 
@@ -835,16 +946,25 @@ class Session:
         if name == "recall_fact":
             template = FACT_REPLIES.get(result["key"], "Your {key} is {value}.")
             said = template.format(key=result["key"], value=result["value"])
+            said = _with_citation(said, memory_cite(result.get("id")))
             self._log_exchange(text, said)
             return said
         if name == "recall_episode":
             # The episode text is already the sentence. The model is not
             # asked to rephrase it, for the same reason a fact is not.
             said = f"Last time, {result['text']}"
+            said = _with_citation(said, memory_cite(result.get("id")))
             self._log_exchange(text, said)
             return said
         if name == "search_kb":
-            shown = self._passages(result)
+            kept = self._kept_hits(result)
+            # A dense hit below the cut-off is not a passage. An empty list
+            # is not that: the caller handed no hits to judge, and the model
+            # is told so rather than skipped.
+            if result and not kept:
+                self._log_exchange(text, FALLBACK)
+                return FALLBACK
+            shown = self._passages(kept)
         elif name == "get_ticket":
             shown = self._ticket_text(result)
         elif name == "get_booking":
@@ -890,6 +1010,12 @@ class Session:
             # "Shall I book that visit?". The booking is already done, so
             # that sentence is replaced by the row that was written.
             said = _booking_confirmation(said, result, updated=name == "update_slot")
+        if name == "search_kb" and kept:
+            # The passage shown to the model is the one the citation names.
+            # A citation the model invented, for a chunk it was not shown,
+            # is dropped and replaced by that passage's own id. No passage
+            # means no citation, so an empty result is left as the model wrote it.
+            said = ground_citations(said, [chunk_cite(hit) for hit in kept])
         self._log_exchange(text, said)
         return said
 
@@ -902,6 +1028,8 @@ class Session:
         The persona is read from skills/ for this call too.
         """
         intent = self.history[-1]["intent"] if self.history else ""
+        if intent == "forget":
+            return REPLIES["forget"]
         # A bare hello shares the out_of_scope intent with a payroll question.
         # Only the hello gets the greeting line, so the refusal stays a refusal.
         if intent == "out_of_scope" and is_greeting(text):
@@ -909,14 +1037,13 @@ class Session:
         # "What did we do last time?" with nothing stored is not a refusal
         # of a payroll question. It is a memory miss.
         if self._asks_for_episode(text) and intent in ("out_of_scope", "recall_fact"):
-            # Returned as written. An open turn is otherwise reworded by the
-            # model, and a memory miss has no fact for it to rephrase.
-            # reply() records the exchange, so this return must not.
-            return REPLIES["recall_episode"]
+            # Nothing stored is close enough. The fallback is exact, and the
+            # model is not asked to soften it into a guess.
+            return FALLBACK
         # A question about the user that matched nothing stored. Same reason:
         # the model invents an office when it is asked to reword the miss.
         if intent == "recall_fact":
-            return REPLIES["recall_fact"]
+            return FALLBACK
         # "I'll remember that" is only true when a row was written. A
         # provide_info turn that stored nothing gets the refusal instead,
         # so the bot does not claim to have kept a colour it dropped.
@@ -1003,24 +1130,31 @@ class Session:
             tool=self.tool_call,
         )
 
-    def _passages(self, hits: list[dict]) -> str:
-        """The passages the reply may quote.
+    def _kept_hits(self, hits: list[dict]) -> list[dict]:
+        """The hits the reply may quote.
 
-        A hit whose dense score is below the relevance cut-off is dropped.
-        Hybrid scores are rank-fusion scores, not cosines, so only a dense
-        score is compared. When nothing remains, the model is told that
-        rather than handed a weak passage.
+        A dense hit below the relevance cut-off is dropped. Hybrid scores
+        are rank-fusion scores, not cosines, so only a dense score is
+        compared. An empty list means the question has no passage.
         """
         kept = []
-        for hit in hits:
+        for hit in hits or []:
             if hit.get("mode") == "dense" and hit.get("score", 0) < RELEVANCE_THRESHOLD:
                 continue
             kept.append(hit)
-        if not kept:
+        return kept
+
+    def _passages(self, hits: list[dict]) -> str:
+        """The passages the reply may quote, each labelled with its cite id.
+
+        The id is [doc_id#chunk_id]. The reply has to carry the same token,
+        so a reader can check it against the index.
+        """
+        if not hits:
             return NO_PASSAGE
         lines = []
-        for hit in kept:
-            lines.append(f"[{hit['doc_id']}] {hit['text']}")
+        for hit in hits:
+            lines.append(f"{chunk_cite(hit)} {hit['text']}")
         return "\n".join(lines)
 
     def _ticket_text(self, result) -> str:
@@ -1062,9 +1196,23 @@ class Session:
         self.slots["date"] = None
         self.slots["time"] = None
 
-    def end(self, reflection: str) -> dict:
-        """Close the session: keep the summary as an episode, then drop it."""
-        return self.memory.end_session(reflection)
+    def end(self, reflection: str | None = None) -> dict:
+        """Close the session: write the reflection and drop the working summary.
+
+        A reflection passed in is stored as given. None means the session
+        writes its own from the turns, which is what the page does when the
+        box is left empty.
+        """
+        from src.history import earlier_turns
+
+        return self.memory.end_session(
+            reflection,
+            earlier_turns(self.history),
+            turn=self.turn,
+            trace=self.calls,
+            run_id=self.run_id,
+            config=self.strategy,
+        )
 
 
 def main() -> None:

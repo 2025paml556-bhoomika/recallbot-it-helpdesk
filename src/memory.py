@@ -23,9 +23,25 @@ import json
 import re
 from pathlib import Path
 
-from src.episodic_memory import EpisodicMemory
-from src.history import WorkingMemory
+import time
+
+from src.config import CHAT_MODEL
+from src.episodic_memory import EpisodicMemory, rate
+from src.history import WorkingMemory, render
+from src.llm import chat
+from src.logger import log_call
 from src.semantic_memory import FACT_KEYS, SemanticMemory
+
+# Written once, when the session ends. The model is handed the turns and
+# asked for the note a later session should be able to read back. It is not
+# typed by hand: end_session() calls this and stores whatever comes back.
+REFLECT_SYSTEM = """You write the closing note for one IT helpdesk session.
+
+You are given the turns. Write one short paragraph a later session can read.
+- Keep the ticket, the booking (place, day and time), and any decision the user made.
+- Do not include a personal phone number, even if one was said.
+- Write only the note. No preamble, no JSON.
+"""
 
 # A session id becomes a filename, so anything that is not a plain character
 # is flattened. Two ids that flatten to the same name would share a file.
@@ -150,6 +166,25 @@ class Memory:
             "episodes": self.episodic.recall(self.user, text),
         }
 
+    def forget_request(self, key: str, value: str | None) -> dict:
+        """Delete one fact the user asked to be forgotten.
+
+        The key's rows go, including a value that was superseded earlier.
+        The value is also removed from this user's episodes, so a reflection
+        that quoted the phone number does not keep it. Another user's rows
+        are not touched. Returns the counts removed.
+        """
+        removed = {
+            "key": key,
+            "facts": self.semantic.forget(self.user, key),
+            "episodes": 0,
+        }
+        if value:
+            removed["episodes"] = self.episodic.forget(self.user, value)
+            # A note that quoted the number is not under the key.
+            removed["facts"] += self.semantic.forget_value(self.user, value)
+        return removed
+
     def record_turn(self, text: str, intent: str, slots: dict, turn: int) -> list[dict]:
         """Write the facts this turn stated. Returns the records written.
 
@@ -178,26 +213,123 @@ class Memory:
             return self.semantic.extract(self.user, "", only_asset, turn)
         return self.semantic.extract(self.user, text, remembered, turn)
 
-    def remember_event(self, text: str, episode_type: str, turn: int | None = None) -> dict | None:
-        """Append one episode for something that just happened, such as a ticket."""
-        return self.episodic.add(
+    def remember_event(
+        self,
+        text: str,
+        episode_type: str,
+        turn: int | None = None,
+        *,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> dict | None:
+        """Append one episode for something that just happened, such as a ticket.
+
+        The importance is the rule in rate(), and it is logged as its own
+        call_type so the log shows the score that was stored. Small talk
+        writes nothing and logs nothing.
+        """
+        importance = rate(text, episode_type)
+        written = self.episodic.add(
             self.user,
             text,
             episode_type,
             session=self.session,
+            importance=importance,
+        )
+        if written is not None:
+            self._log_importance(written, turn, run_id=run_id, config=config)
+        return written
+
+    def _log_importance(
+        self,
+        record: dict,
+        turn: int | None,
+        *,
+        run_id: str | None,
+        config: str | None,
+    ) -> None:
+        """One log line per episode, carrying the 1-10 score that was stored."""
+        log_call(
+            call_type="importance",
+            model="rule",
+            input_tokens=0,
+            output_tokens=0,
+            start=time.time(),
+            config=config,
+            user=self.user,
+            session=self.session,
+            turn=turn,
+            run_id=run_id,
+            extra={
+                "episode_id": record["id"],
+                "episode_type": record["type"],
+                "importance": record["importance"],
+            },
         )
 
-    def end_session(self, reflection: str) -> dict:
+    def reflect(
+        self,
+        turns: list[dict],
+        *,
+        turn: int | None = None,
+        trace: list | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> str:
+        """Ask the model for the session note. Logged as call_type "reflect".
+
+        turns are the completed exchanges, each {"user", "bot"}. An empty
+        list still produces a note, so a session that only booked something
+        the model never phrased still closes.
+        """
+        body = render(turns) if turns else "(no turns)"
+        # chat() logs this as call_type "reflect". log stays on, so the line
+        # carries the API's own token counts rather than a zero.
+        return chat(
+            f"Turns:\n{body}",
+            system=REFLECT_SYSTEM,
+            temperature=0.0,
+            model=CHAT_MODEL,
+            call_type="reflect",
+            config=config,
+            user=self.user,
+            session=self.session,
+            turn=turn,
+            trace=trace,
+            run_id=run_id,
+        ).strip()
+
+    def end_session(
+        self,
+        reflection: str | None = None,
+        turns: list[dict] | None = None,
+        *,
+        turn: int | None = None,
+        trace: list | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> dict:
         """Write the reflection, keep one episode of the summary, drop it.
 
-        The summary episode is how a later session reads what this one was
-        about. The reflection is the separate note the brief asks for. The
-        working file is removed either way.
+        reflection given is stored as it stands, which is how a test plants
+        a known note. reflection omitted is generated from the turns, which
+        is what the session does when it closes. The working file is removed
+        either way.
         """
         summary = self.working.end()
         if summary:
-            self.episodic.add(self.user, summary, "note", session=self.session)
-        return self.episodic.reflect(self.user, self.session, reflection)
+            self.remember_event(summary, "note", turn, run_id=run_id, config=config)
+        if not (reflection or "").strip():
+            reflection = self.reflect(
+                turns or [],
+                turn=turn,
+                trace=trace,
+                run_id=run_id,
+                config=config,
+            )
+        written = self.episodic.reflect(self.user, self.session, reflection)
+        self._log_importance(written, turn, run_id=run_id, config=config)
+        return written
 
     def forget(self, value: str) -> dict:
         """Remove a fact from the semantic store and from this user's episodes."""

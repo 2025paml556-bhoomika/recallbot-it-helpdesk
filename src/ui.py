@@ -183,7 +183,10 @@ def clear_user(user: str, session: str) -> dict:
 
 def close_session(user: str, session: str, reflection: str) -> dict:
     current = get_session(user, session)
-    written = current.end(reflection.strip() or f"{user} ended session {session}.")
+    # An empty box means the session writes its own note. A typed box is
+    # stored as given, so a test can still plant a known reflection.
+    typed = reflection.strip()
+    written = current.end(typed or None)
     drop_session(user, session)
     return {
         "reflection": {"id": written["id"], "text": written["text"]},

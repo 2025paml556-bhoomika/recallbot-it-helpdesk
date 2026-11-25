@@ -49,24 +49,46 @@ from src.config import (
 from src.embedder import embed
 
 # What an episode can be. A reflection is the session-end note.
-TYPES = ("event", "booking", "ticket", "reflection", "note")
+TYPES = ("event", "booking", "ticket", "decision", "reflection", "note")
 
 # Importance is a rule, not a model call: a ticket or a booking is the thing
 # a later session asks about, and small talk is not. The rule is deterministic,
-# so the same session always yields the same importance.
+# so the same session always yields the same importance. A decision (a refresh
+# rather than another repair) outranks a complaint, which is what the two
+# weightings in the tests compare.
 IMPORTANCE = {
     "ticket": 8,
     "booking": 7,
+    "decision": 9,
     "event": 6,
     "reflection": 5,
     "note": 2,
 }
+
+# Words that make an event a decision rather than a complaint. The scripted
+# turn is "I'd like to go ahead with the refresh rather than another repair."
+_DECISION = re.compile(r"\b(rather than|decided|decision|go ahead with)\b", re.IGNORECASE)
 
 _SMALL_TALK = re.compile(
     r"^(thanks|thank you|thx|ok|okay|bye|goodbye|hi|hello|hey|"
     r"good morning|good night|have a (good|nice) day|cheers)[\s!.]*$",
     re.IGNORECASE,
 )
+
+
+def rate(text: str, episode_type: str) -> int:
+    """The 1-10 importance of one episode, from the type and the wording.
+
+    A decision is the highest: the user chose something a later session has
+    to remember. A ticket and a booking come next. A complaint is an event.
+    Anything the rule does not recognise stays a low note. The result is
+    always between 1 and 10.
+    """
+    kind = episode_type
+    if kind == "event" and _DECISION.search(text or ""):
+        kind = "decision"
+    value = IMPORTANCE.get(kind, IMPORTANCE["note"])
+    return max(1, min(10, int(value)))
 
 
 def score(
@@ -128,7 +150,7 @@ class EpisodicMemory:
             "session": session,
             "ts": stamp.astimezone(timezone.utc).isoformat(timespec="seconds"),
             "text": text.strip(),
-            "importance": int(importance if importance is not None else IMPORTANCE[episode_type]),
+            "importance": int(importance if importance is not None else rate(text, episode_type)),
             "type": episode_type,
         }
         vector = embed([record["text"]], log=False)[0]

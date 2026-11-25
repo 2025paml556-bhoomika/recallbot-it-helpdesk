@@ -58,6 +58,50 @@ TICKET_RE = re.compile(r"\bTCK-\d+\b", re.IGNORECASE)
 ASSET_RE = re.compile(r"\bLAP-[A-Z0-9]+\b", re.IGNORECASE)
 ERROR_RE = re.compile(r"\b(?:" + "|".join(ERROR_CODES) + r")\b", re.IGNORECASE)
 
+# "Please forget my personal phone number. Don't keep 98220 11435."
+# The key is named in words. The value, when the sentence gives one, is
+# the thing that must also leave the episodes and the notes.
+_FORGET = re.compile(
+    r"\b(?:forget|delete|erase|remove|don'?t keep|do not keep)\b",
+    re.IGNORECASE,
+)
+_FORGET_KEY = (
+    ("personal_phone", re.compile(r"\b(?:phone|mobile)\b", re.IGNORECASE)),
+    ("manager", re.compile(r"\bmanager\b", re.IGNORECASE)),
+    ("office", re.compile(r"\boffice\b", re.IGNORECASE)),
+    ("location", re.compile(r"\b(?:location|where i sit)\b", re.IGNORECASE)),
+    ("laptop_model", re.compile(r"\blaptop model\b", re.IGNORECASE)),
+    ("asset_id", re.compile(r"\blaptop\b", re.IGNORECASE)),
+    ("department", re.compile(r"\bdepartment\b", re.IGNORECASE)),
+    ("contact_time", re.compile(r"\b(?:call|contact)\b", re.IGNORECASE)),
+    ("vpn_client", re.compile(r"\bvpn\b", re.IGNORECASE)),
+    ("os", re.compile(r"\b(?:operating system|windows|macos)\b", re.IGNORECASE)),
+)
+_FORGET_PHONE = re.compile(r"\b(\d{5}\s*\d{5})\b")
+
+
+def forget_request(text: str) -> dict | None:
+    """The fact a sentence asks to delete, or None when it asks nothing.
+
+    Returns {"key", "value"}. value is None when the sentence names the
+    fact but not the value. "Please forget my personal phone number" is a
+    deletion. "What number did I give you?" is not, because it never says
+    forget.
+    """
+    if not _FORGET.search(text or ""):
+        return None
+    for key, pattern in _FORGET_KEY:
+        if pattern.search(text):
+            value = None
+            if key == "personal_phone":
+                phone = _FORGET_PHONE.search(text)
+                if phone:
+                    digits = re.sub(r"\s+", "", phone.group(1))
+                    value = f"{digits[:5]} {digits[5:]}"
+            return {"key": key, "value": value}
+    return None
+
+
 _YES = re.compile(
     r"^(yes|yeah|yep|sure|go ahead|please do|book it|confirm)[\s.!]*$",
     re.IGNORECASE,

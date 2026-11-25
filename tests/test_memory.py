@@ -193,6 +193,37 @@ def test_a_forget_removes_the_episode_and_a_restart_cannot_find_it(tmp_path):
     assert reloaded.vector_count() == 0
 
 
+def test_a_decision_scores_nine_and_a_complaint_scores_six(tmp_path):
+    """The refresh decision outranks the VPN complaint on importance alone.
+
+    Recency-heavy ranking puts the complaint from an hour ago first.
+    Importance-heavy ranking puts the decision first, even though it is old.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    store = EpisodicMemory(tmp_path)
+    now = datetime.now(timezone.utc)
+    complaint = store.add(
+        "U1",
+        "The VPN keeps failing with ERR-VPN-809.",
+        "event",
+        when=now - timedelta(hours=1),
+    )
+    decision = store.add(
+        "U1",
+        "I'd like to go ahead with the refresh rather than another repair.",
+        "event",
+        when=now - timedelta(hours=400),
+    )
+    assert complaint["importance"] == 6
+    assert decision["importance"] == 9
+
+    by_recency = store.recall("U1", "what happened", now=now, alpha=1.0, beta=0.0, gamma=0.0)
+    by_importance = store.recall("U1", "what happened", now=now, alpha=0.0, beta=1.0, gamma=0.0)
+    assert by_recency[0]["importance"] == 6
+    assert by_importance[0]["importance"] == 9
+
+
 def test_two_weightings_rank_a_probe_differently(tmp_path):
     from datetime import datetime, timedelta, timezone
 
@@ -240,6 +271,74 @@ def test_asking_where_i_sit_does_not_write_a_fact(tmp_path):
     written = memory.record_turn("Where do I sit?", "recall_fact", {}, turn=2)
     assert written == []
     assert memory.semantic.active("U1")[0]["value"] == "Pune office"
+
+
+def test_ending_a_session_writes_a_reflection_the_next_session_reads(monkeypatch, tmp_path):
+    """No reflection is typed in. The model writes it, and it is logged.
+
+    A second Memory is a second process: it can only find the reflection
+    because the first one wrote it to the file.
+    """
+    import json
+    import time
+
+    from src.config import LOG_PATH
+    from src.logger import log_call
+    from src.memory import Memory
+
+    def fake_chat(prompt, **kwargs):
+        if kwargs["call_type"] == "summary":
+            return "U1 has a VPN fault and wants a Thursday visit."
+        assert kwargs["call_type"] == "reflect"
+        assert "Thursday" in prompt
+        # The real chat() writes the reflect line. A stub has to as well,
+        # or the log would not show the step the brief asks for.
+        log_call(
+            call_type="reflect",
+            model="stub",
+            input_tokens=0,
+            output_tokens=0,
+            start=time.time(),
+            config=kwargs.get("config"),
+            user=kwargs.get("user"),
+            session=kwargs.get("session"),
+            turn=kwargs.get("turn"),
+        )
+        return "U1 booked a Thursday visit for the VPN fault and chose a refresh."
+
+    monkeypatch.setattr("src.history.chat", fake_chat)
+    monkeypatch.setattr("src.memory.chat", fake_chat)
+    before = len(LOG_PATH.read_text(encoding="utf-8").splitlines()) if LOG_PATH.exists() else 0
+
+    memory = Memory("U1", "A", root=tmp_path)
+    memory.working.update([{"user": "Book Thursday.", "bot": "Booked."}], turn=16)
+    written = memory.end_session(
+        None,
+        turns=[{"user": "Book the Thursday visit.", "bot": "Booked Thursday at 4 pm."}],
+        turn=25,
+        config="full",
+    )
+    assert written["type"] == "reflection"
+    assert "Thursday" in written["text"]
+    assert written["importance"] == 5
+    assert not memory.working.path.exists()
+
+    added = [
+        json.loads(line)
+        for line in LOG_PATH.read_text(encoding="utf-8").splitlines()[before:]
+    ]
+    assert any(row["call_type"] == "reflect" for row in added)
+    assert any(
+        row["call_type"] == "importance" and row.get("importance") == 5
+        and row.get("episode_type") == "reflection"
+        for row in added
+    )
+
+    later = Memory("U1", "B", root=tmp_path)
+    hits = later.episodic.recall("U1", "what did I book last time")
+    assert hits
+    assert hits[0]["type"] == "reflection"
+    assert "Thursday" in hits[0]["text"]
 
 
 def test_ending_a_session_deletes_the_working_summary(monkeypatch, tmp_path):
@@ -489,6 +588,44 @@ def test_who_is_my_manager_recalls_the_manager_and_not_the_office(tmp_path):
     assert hits
     assert hits[0]["key"] == "manager"
     assert hits[0]["value"] == "Priya Nair"
+
+
+def test_turn_22_forgets_the_phone_and_a_restart_cannot_read_it(tmp_path):
+    """The scripted forget names the key and the number.
+
+    Both have to leave the file. The office stated on an earlier turn stays,
+    and a store opened afterwards, as a new session would, finds no phone.
+    """
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    memory.record_turn(
+        "I sit at the Pune office, on the third floor.",
+        "provide_info",
+        {},
+        turn=3,
+    )
+    memory.record_turn(
+        "If the desk has to reach me, my personal number is 98220 11435.",
+        "provide_info",
+        {},
+        turn=7,
+    )
+    memory.episodic.add("U1", "Meera can be reached on 98220 11435.", "note", session="A")
+    assert any(row["key"] == "personal_phone" for row in memory.semantic.active("U1"))
+
+    removed = memory.forget_request("personal_phone", "98220 11435")
+    assert removed["facts"] >= 1
+    assert removed["episodes"] == 1
+
+    reloaded = Memory("U1", "B", root=tmp_path)
+    active = {row["key"]: row["value"] for row in reloaded.semantic.active("U1")}
+    assert "personal_phone" not in active
+    assert active["office"] == "Pune"
+    text = reloaded.semantic.path.read_text(encoding="utf-8")
+    assert "98220 11435" not in text
+    assert "98220 11435" not in reloaded.episodic.path.read_text(encoding="utf-8")
+    assert reloaded.semantic.recall("U1", "What number did I give you for my personal phone?") == []
 
 
 def test_a_booking_sentence_does_not_overwrite_the_profile_office(tmp_path):

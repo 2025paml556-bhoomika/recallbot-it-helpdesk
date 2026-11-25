@@ -15,11 +15,11 @@ from src.agent import (
     ACTION_ASK,
     ACTION_NONE,
     ACTION_TOOL,
+    FALLBACK,
     BOOKING_ASKS,
     BOOKING_SLOTS,
     BOOKING_STEPS_PATH,
     CONFIRM_BOOKING,
-    NO_PASSAGE,
     OPEN_TEMPERATURE,
     OPEN_TOP_P,
     REPLIES,
@@ -897,9 +897,9 @@ def test_a_search_with_nothing_relevant_is_not_handed_a_passage(monkeypatch, tmp
     session.ingest(text)
     said = session.reply(text, session.decide(text))
 
-    assert said == "I don't know."
-    assert NO_PASSAGE in seen["prompt"]
-    assert "ERR-VPN-809" not in seen["prompt"]
+    # Nothing cleared the cut-off, so the model is not called at all.
+    assert said == FALLBACK
+    assert seen == {}
 
 
 def test_a_search_hands_the_model_the_passage_it_may_quote(monkeypatch, tmp_path):
@@ -918,9 +918,15 @@ def test_a_search_hands_the_model_the_passage_it_may_quote(monkeypatch, tmp_path
     text = "What does ERR-VPN-809 mean?"
     session.ingest(text)
     said = session.reply(text, session.decide(text))
+    # The model named the document and not the chunk. The reply still has to
+    # carry the chunk it was actually shown.
+    assert "[KB-VPN#" in said
+    assert said.endswith("]")
 
     assert "KB-VPN" in said
-    assert "[KB-VPN]" in seen["prompt"]
+    # The prompt labels the passage with the chunk, not the bare document.
+    assert "[KB-VPN#" in seen["prompt"]
+    assert "[KB-VPN]" not in seen["prompt"]
 
 
 def test_a_ticket_that_is_not_the_users_is_phrased_as_not_found(monkeypatch, tmp_path):
@@ -953,6 +959,54 @@ def test_a_ticket_that_is_not_the_users_is_phrased_as_not_found(monkeypatch, tmp
     assert said == "I couldn't find that ticket."
     assert "No ticket was found" in seen["prompt"]
     assert ticket_id not in seen["prompt"]
+
+
+def test_a_kb_reply_drops_a_citation_for_a_chunk_it_was_not_shown(monkeypatch, tmp_path):
+    """The model cites a document the search did not return. That cite goes."""
+    from src.agent import chunk_cite, ground_citations
+
+    allowed = "[KB-VPN#KB-VPN@2026.1:128:0]"
+    invented = "The tunnel dropped [KB-PASSWORD#KB-PASSWORD@2025.1:128:0]."
+    grounded = ground_citations(invented, [allowed])
+    assert "[KB-PASSWORD#" not in grounded
+    assert grounded.endswith(allowed)
+
+    # A cite the model copied from the passage it was shown is kept, and not
+    # doubled by the one that gets appended when none survived.
+    copied = ground_citations(f"The tunnel dropped {allowed}", [allowed])
+    assert copied.count(allowed) == 1
+
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"What does ERR-VPN-809 mean?": {"intent": "ask_kb"}}),
+    )
+    monkeypatch.setattr(
+        "src.agent.search_kb",
+        lambda *args, **kwargs: [
+            {
+                "rank": 1,
+                "score": 0.9,
+                "mode": "hybrid",
+                "chunk_id": "KB-VPN@2026.1:128:0",
+                "doc_id": "KB-VPN",
+                "text": "ERR-VPN-809 means the tunnel dropped.",
+            }
+        ],
+    )
+
+    def fake(prompt, **kwargs):
+        return "The tunnel dropped [KB-SLA#KB-SLA@2026.1:128:0]."
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    text = "What does ERR-VPN-809 mean?"
+    session.ingest(text)
+    said = session.reply(text, session.decide(text))
+    assert "[KB-SLA#" not in said
+    assert said.endswith(chunk_cite({
+        "doc_id": "KB-VPN",
+        "chunk_id": "KB-VPN@2026.1:128:0",
+    }))
 
 
 def test_an_open_turn_is_reworded_and_reads_the_skill_file(monkeypatch, tmp_path):
@@ -1149,10 +1203,14 @@ def test_located_and_asset_id_are_recalled_end_to_end(monkeypatch, tmp_path):
     second = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
     place = "Where am I located"
     second.ingest(place)
-    assert second.reply(place, second.decide(place)) == "You sit at Hyderabad office."
+    place_reply = second.reply(place, second.decide(place))
+    assert place_reply.startswith("You sit at Hyderabad office.")
+    assert "[mem:" in place_reply
     asset = "Whats my asset Id ?"
     second.ingest(asset)
-    assert second.reply(asset, second.decide(asset)) == "You use LAP-T14G3."
+    asset_reply = second.reply(asset, second.decide(asset))
+    assert asset_reply.startswith("You use LAP-T14G3.")
+    assert "[mem:" in asset_reply
 
 
 def test_a_colour_is_remembered_and_a_badge_does_not_become_the_laptop(monkeypatch, tmp_path):
@@ -1190,10 +1248,14 @@ def test_a_colour_is_remembered_and_a_badge_does_not_become_the_laptop(monkeypat
     later = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
     colour = "What colour is my laptop bag?"
     later.ingest(colour)
-    assert later.reply(colour, later.decide(colour)) == "You told me: My laptop bag is blue."
+    colour_reply = later.reply(colour, later.decide(colour))
+    assert colour_reply.startswith("You told me: My laptop bag is blue.")
+    assert "[mem:" in colour_reply
     asset = "Whats my asset Id ?"
     later.ingest(asset)
-    assert later.reply(asset, later.decide(asset)) == "You use LAP-T14G3."
+    asset_reply = later.reply(asset, later.decide(asset))
+    assert asset_reply.startswith("You use LAP-T14G3.")
+    assert "[mem:" in asset_reply
 
 
 def test_provide_info_that_stores_nothing_does_not_claim_to_remember(monkeypatch, tmp_path):
@@ -1237,7 +1299,9 @@ def test_a_past_event_is_read_from_the_episode_log(monkeypatch, tmp_path):
     decision = session.decide(text)
     assert decision["action"] == ACTION_TOOL
     assert decision["name"] == "recall_episode"
-    assert session.reply(text, decision) == "Last time, Raised TCK-1042 for the laptop screen."
+    said = session.reply(text, decision)
+    assert said.startswith("Last time, Raised TCK-1042 for the laptop screen.")
+    assert "[mem:" in said
 
     other = Session("U2", "B", memory=Memory("U2", "B", root=tmp_path))
     other.ingest(text)
@@ -1248,46 +1312,7 @@ def test_a_past_event_is_read_from_the_episode_log(monkeypatch, tmp_path):
         raise AssertionError("a memory miss must not call the chat model")
 
     monkeypatch.setattr("src.agent.chat", fail_chat)
-    assert other.reply(text, missed) == REPLIES["recall_episode"]
-
-
-def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "src.agent.understand",
-        _scripted(
-            {
-                "I sit at the Pune office.": {
-                    "intent": "provide_info",
-                    "slots": {"location": "Pune office, 3rd floor, desk 14"},
-                },
-                "Where do I sit?": {"intent": "recall_fact"},
-            }
-        ),
-    )
-    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
-    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
-
-    first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
-    first.ingest("I sit at the Pune office.")
-
-    # A new session, and a new process would do the same: it reads the file.
-    second = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
-    text = "Where do I sit?"
-    recalled = second.ingest(text)
-    offices = [fact["value"] for fact in recalled["recalled"]["facts"]]
-    assert "Pune office, 3rd floor, desk 14" in offices
-    # The question states nothing, so the stored fact is not rewritten.
-    assert len(second.memory.semantic.active("U1")) == 1
-
-    said = second.reply(text, second.decide(text))
-    assert said == "You sit at Pune office, 3rd floor, desk 14."
-
-    # A different user reads the same folder and finds nothing of U1's.
-    other = Session("U2", "B", memory=Memory("U2", "B", root=tmp_path))
-    theirs = other.ingest(text)
-    assert theirs["recalled"]["facts"] == []
-    assert theirs["recalled"]["episodes"] == []
-    assert other.reply(text, other.decide(text)) == REPLIES["recall_fact"]
+    assert other.reply(text, missed) == FALLBACK
 
 
 def _fake_embed(texts, **kwargs):
@@ -1409,7 +1434,9 @@ def test_a_tool_turn_logs_the_prompts_and_the_tool_call(monkeypatch, tmp_path):
     roles = [message["role"] for message in turn["calls"][0]["messages"]]
     assert roles == ["system", "user", "assistant"]
     assert "Tool result" in turn["calls"][0]["messages"][1]["content"]
-    assert turn["calls"][0]["messages"][2]["content"] == said
+    assert turn["calls"][0]["messages"][2]["content"] == "ERR-VPN-809 means the tunnel dropped, from vpn.md."
+    # The stub named no chunk, so the reply carries the chunk it was shown.
+    assert "[vpn.md#" in said
 
 def test_the_office_question_is_sent_when_labelling_the_answer(monkeypatch, tmp_path):
     seen = []
@@ -2043,3 +2070,140 @@ def test_the_same_time_reuses_the_booked_time(monkeypatch, tmp_path):
     assert session.slots["time"] == "4 pm"
     assert session.slots["date"] == "Friday"
     assert _rows(db_path, "slots") == []
+
+
+def test_closing_the_session_stores_the_models_reflection(monkeypatch, tmp_path):
+    """End with no typed note. The model writes one, and Session B reads it."""
+    def fake_chat(prompt, **kwargs):
+        assert kwargs["call_type"] == "reflect"
+        return "Session A booked a Thursday visit for the VPN fault."
+
+    monkeypatch.setattr("src.memory.chat", fake_chat)
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    first.history.append({"text": "Yes, book it.", "bot": "Booked Thursday at 4 pm."})
+    written = first.end()
+    assert written["type"] == "reflection"
+    assert "Thursday" in written["text"]
+
+    later = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
+    hits = later.memory.episodic.recall("U1", "what did I book last time")
+    assert hits
+    assert hits[0]["type"] == "reflection"
+    assert hits[0]["session"] == "A"
+
+
+def test_a_booked_visit_logs_its_importance(monkeypatch, tmp_path):
+    import json
+
+    from src.config import LOG_PATH
+
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({
+            "Please raise the VPN failure.": {
+                "intent": "fix_issue",
+                "slots": {
+                    "issue_type": "VPN failure",
+                    "location": "Pune office",
+                    "date": "Thursday",
+                    "time": "4 pm",
+                },
+            },
+        }),
+    )
+    before = len(LOG_PATH.read_text(encoding="utf-8").splitlines()) if LOG_PATH.exists() else 0
+    session = Session("U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path))
+    session.run_id = "imp-test"
+    text = "Please raise the VPN failure."
+    session.ingest(text)
+    session.decide(text)
+    session.ingest("yes")
+    session.decide("yes")
+
+    added = [json.loads(line) for line in LOG_PATH.read_text(encoding="utf-8").splitlines()[before:]]
+    scores = [row for row in added if row["call_type"] == "importance"]
+    assert {row["episode_type"] for row in scores} == {"ticket", "booking"}
+    assert {row["importance"] for row in scores} == {8, 7}
+    assert all(row["run_id"] == "imp-test" and row["config"] == "full" for row in scores)
+
+
+def test_please_forget_deletes_the_phone_before_any_model_call(monkeypatch, tmp_path):
+    """Turn 22. The sentence must never reach understand().
+
+    If it did, the model could label it provide_info and store the number
+    again. The reply is the fixed line, and a later session finds nothing.
+    """
+    def boom(*args, **kwargs):
+        raise AssertionError("understand() must not be called for a forget")
+
+    monkeypatch.setattr("src.agent.understand", boom)
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    first.memory.record_turn(
+        "If the desk has to reach me, my personal number is 98220 11435.",
+        "provide_info",
+        {},
+        turn=7,
+    )
+    first.memory.semantic.remember("U1", "office", "Hyderabad", turn=20)
+
+    text = "Please forget my personal phone number. Don't keep 98220 11435."
+    seen = first.ingest(text)
+    assert seen["intent"] == "forget"
+    assert seen["source"] == "rule"
+    assert seen["forgotten"]["key"] == "personal_phone"
+    assert seen["forgotten"]["facts"] >= 1
+    assert first.decide(text) == {"action": ACTION_NONE}
+    assert first.reply(text, {"action": ACTION_NONE}) == "I've forgotten that."
+    assert "98220 11435" not in first.memory.semantic.path.read_text(encoding="utf-8")
+
+    later = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
+    assert later.memory.semantic.recall("U1", "What number did I give you for my personal phone?") == []
+    # The office was not part of the request, so it is still there.
+    assert any(row["key"] == "office" for row in later.memory.semantic.active("U1"))
+
+
+def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "I sit at the Pune office.": {
+                    "intent": "provide_info",
+                    "slots": {"location": "Pune office, 3rd floor, desk 14"},
+                },
+                "Where do I sit?": {"intent": "recall_fact"},
+            }
+        ),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    first.ingest("I sit at the Pune office.")
+
+    # A new session, and a new process would do the same: it reads the file.
+    second = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
+    text = "Where do I sit?"
+    recalled = second.ingest(text)
+    offices = [fact["value"] for fact in recalled["recalled"]["facts"]]
+    assert "Pune office, 3rd floor, desk 14" in offices
+    # The question states nothing, so the stored fact is not rewritten.
+    assert len(second.memory.semantic.active("U1")) == 1
+
+    said = second.reply(text, second.decide(text))
+    assert said.startswith("You sit at Pune office, 3rd floor, desk 14.")
+    assert "[mem:" in said
+
+    # A different user reads the same folder and finds nothing of U1's.
+    other = Session("U2", "B", memory=Memory("U2", "B", root=tmp_path))
+    theirs = other.ingest(text)
+    assert theirs["recalled"]["facts"] == []
+    assert theirs["recalled"]["episodes"] == []
+    assert other.reply(text, other.decide(text)) == FALLBACK
+
