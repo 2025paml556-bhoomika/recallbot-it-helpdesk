@@ -109,6 +109,11 @@ EPISODIC_DECAY = 0.995
 # The rolling summary is capped so it cannot crowd the retrieved passage.
 WORKING_SUMMARY_TOKENS = 150
 
+# The chat context is 4,096 tokens. About 500 are kept back for the reply,
+# so the assembled prompt must stay at or under this. Asserted on every turn.
+REPLY_RESERVE_TOKENS = 500
+PROMPT_BUDGET = CONTEXT_WINDOW - REPLY_RESERVE_TOKENS
+
 # Folders Step 1 must create. Kept here so the check and the README agree.
 REQUIRED_DIRS = (
     ROOT / "src",

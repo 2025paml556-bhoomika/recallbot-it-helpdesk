@@ -1433,7 +1433,7 @@ def test_a_tool_turn_logs_the_prompts_and_the_tool_call(monkeypatch, tmp_path):
     assert "ERR-VPN-809" in turn["tool"]["result"][0]["text"]
     roles = [message["role"] for message in turn["calls"][0]["messages"]]
     assert roles == ["system", "user", "assistant"]
-    assert "Tool result" in turn["calls"][0]["messages"][1]["content"]
+    assert "Tool result:" in turn["calls"][0]["messages"][1]["content"]
     assert turn["calls"][0]["messages"][2]["content"] == "ERR-VPN-809 means the tunnel dropped, from vpn.md."
     # The stub named no chunk, so the reply carries the chunk it was shown.
     assert "[vpn.md#" in said

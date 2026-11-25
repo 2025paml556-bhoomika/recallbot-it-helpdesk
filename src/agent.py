@@ -23,6 +23,7 @@ import json
 
 import re
 
+from src.context_builder import assert_budget, assemble
 from src.history import STRATEGIES, window_text
 from src.llm import chat
 from src.memory import Memory
@@ -268,17 +269,17 @@ _RESCHEDULE = re.compile(
 
 
 def chunk_cite(hit: dict) -> str:
-    """The citation for one retrieved chunk: [doc_id#chunk_id].
+    """The citation for one retrieved chunk: [doc_id#chunk_id]."""
+    from src.grounding import chunk_cite as _chunk_cite
 
-    chunk_id already names the document, the version and the piece. The
-    doc_id is repeated in front so the form matches [doc_id#chunk].
-    """
-    return f"[{hit.get('doc_id')}#{hit.get('chunk_id')}]"
+    return _chunk_cite(hit)
 
 
 def memory_cite(memory_id: str | None) -> str:
     """The citation for one fact or episode: [mem:id]."""
-    return f"[mem:{memory_id}]"
+    from src.grounding import memory_cite as _memory_cite
+
+    return _memory_cite(memory_id)
 
 
 def _with_citation(text: str, cite: str) -> str:
@@ -368,6 +369,9 @@ class Session:
         self.facts_written: list[dict] = []
         # Set when this turn asked to delete a fact. reply() reads it.
         self.forgotten: dict | None = None
+        # The prompt built for the latest model call, with its token table.
+        # None until a turn actually calls the model.
+        self.context = None
 
     def ingest(self, text: str) -> dict:
         """Label one message and merge any new slot values into this session.
@@ -985,16 +989,27 @@ class Session:
         else:
             raise ValueError(f"unknown tool: {name!r}")
 
-        prompt = _with_history(
-            f"User message: {text}\n\nTool result:\n{shown}",
-            self._history_block(),
-        )
         # A tool result is a task turn: temperature 0. The booking steps are
         # included when the reply confirms a visit that was just written, or
         # while one is still being collected. A ticket lookup is neither.
         booking = self.pending_booking or name in ("book_it_slot", "update_slot")
+        # The prompt is built to the budget before it is sent. The system
+        # prompt, the tool result and the current message are kept. Memory,
+        # history and the extra chunks are dropped, lowest priority first,
+        # until the prompt leaves 500 tokens for the reply.
+        built = assemble(
+            system=reply_system(booking=booking),
+            tool_result=shown,
+            facts=self.recalled.get("facts"),
+            episodes=self.recalled.get("episodes"),
+            history=self._history_block(),
+            chunks=kept if name == "search_kb" else None,
+            current=text,
+        )
+        assert_budget(built)
+        self.context = built
         said = chat(
-            prompt,
+            built.prompt,
             system=reply_system(booking=booking),
             temperature=TASK_TEMPERATURE,
             call_type="chat",
@@ -1058,12 +1073,20 @@ class Session:
         # The window is not shown here. A required line is a refusal, a
         # thanks, or "nothing waiting to book", and the model was copying an
         # earlier "Booked slot" line out of the window instead of saying it.
-        prompt = (
-            f"User message: {text}\n\n"
-            f"Required reply, which you may reword but must not change the meaning of:\n{required}"
+        # Memory is left out for the same reason: a stored office would be
+        # worked into a reply that is meant to be the fixed line.
+        built = assemble(
+            system=reply_system(booking=False),
+            current=(
+                f"User message: {text}\n\n"
+                "Required reply, which you may reword but must not change the meaning of:\n"
+                f"{required}"
+            ),
         )
+        assert_budget(built)
+        self.context = built
         return chat(
-            prompt,
+            built.prompt,
             system=reply_system(booking=False),
             temperature=OPEN_TEMPERATURE,
             top_p=OPEN_TOP_P,
