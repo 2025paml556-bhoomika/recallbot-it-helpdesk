@@ -352,6 +352,83 @@ def test_location_wording_is_searched_as_an_office(tmp_path):
         assert hits[0]["value"] == "Hyderabad office"
 
 
+def test_a_colour_and_a_name_are_stored_as_notes(tmp_path):
+    """A sentence with no office and no laptop id is still a fact.
+
+    It is one note, not forced into asset_id. A badge number the model
+    parked in asset_id is rejected there and kept as the sentence instead,
+    so it cannot replace the laptop id.
+    """
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    colour = memory.record_turn(
+        "My laptop bag is blue.",
+        "provide_info",
+        {},
+        turn=1,
+    )
+    assert [row["key"] for row in colour] == ["note"]
+    assert colour[0]["value"] == "My laptop bag is blue."
+
+    badge = memory.record_turn(
+        "My badge number is 4412.",
+        "provide_info",
+        {"asset_id": "4412"},
+        turn=2,
+    )
+    assert [row["key"] for row in badge] == ["note"]
+
+    laptop = memory.record_turn(
+        "My laptop is LAP-T14G3.",
+        "provide_info",
+        {"asset_id": "LAP-T14G3"},
+        turn=3,
+    )
+    assert [row["key"] for row in laptop] == ["asset_id"]
+
+    active = memory.semantic.active("U1")
+    assert {row["key"] for row in active} == {"note", "asset_id"}
+    assert [row["value"] for row in active if row["key"] == "asset_id"] == ["LAP-T14G3"]
+    notes = [row["value"] for row in active if row["key"] == "note"]
+    assert "My laptop bag is blue." in notes
+    assert "My badge number is 4412." in notes
+
+    # A second copy of the same sentence is not a second note.
+    again = memory.record_turn("My laptop bag is blue.", "provide_info", {}, turn=4)
+    assert again[0]["id"] == colour[0]["id"]
+    assert len([row for row in memory.semantic.active("U1") if row["key"] == "note"]) == 2
+
+
+def test_a_fault_and_a_visit_are_not_stored_as_notes(tmp_path):
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    assert memory.record_turn(
+        "The printer on my floor jams every morning.",
+        "fix_issue",
+        {"location": "floor"},
+        turn=1,
+    ) == []
+    assert memory.record_turn("Monday", "book_slot", {"date": "Monday"}, turn=2) == []
+    assert memory.semantic.active("U1") == []
+
+
+def test_a_colour_question_finds_the_note_not_the_laptop(tmp_path):
+    store = SemanticMemory(tmp_path)
+    store.remember("U1", "asset_id", "LAP-T14G3", turn=1)
+    store.remember("U1", "note", "My laptop bag is blue.", turn=2)
+    store.remember("U1", "note", "My badge number is 4412.", turn=3)
+    hits = store.recall("U1", "What colour is my laptop bag?")
+    assert hits
+    assert hits[0]["key"] == "note"
+    assert hits[0]["value"] == "My laptop bag is blue."
+    # The laptop id is still found by a laptop question.
+    laptop = store.recall("U1", "Whats my asset Id ?")
+    assert laptop[0]["key"] == "asset_id"
+    assert laptop[0]["value"] == "LAP-T14G3"
+
+
 def test_asset_wording_is_searched_as_a_laptop(tmp_path):
     store = SemanticMemory(tmp_path)
     store.remember("U1", "asset_id", "LAP-T14G3", turn=1)
