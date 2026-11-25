@@ -7,7 +7,7 @@
 
 **Proposed stack:**
 - Python 3.10+
-- Chat model: Qwen2.5-7B through Ollama, or Groq's free tier
+- Chat model: Qwen2.5-3B through Ollama (`qwen2.5:3b`), one model for every configuration
 - Tokenizer: the matching Hugging Face `AutoTokenizer`
 - Embeddings: `all-MiniLM-L6-v2` (384 dimensions, mean pooling)
 - Index: FAISS

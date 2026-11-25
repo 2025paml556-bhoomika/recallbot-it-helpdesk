@@ -11,7 +11,7 @@ Gaps 1–8 compare the plan text with the PDF. Gaps 9–16 came from a second pa
 
 ## Gaps
 
-### 1. Chat model contradicts itself
+### 1. Chat model contradicts itself — fixed
 
 - PDF: one chat model for every configuration, so comparisons stay fair. Any allowed API or a small local model (Ollama, llama.cpp, Hugging Face) is fine.
 - Plan header: “Qwen2.5-7B through Ollama, or Groq's free tier”.
