@@ -43,12 +43,14 @@ python -c "from src.llm import chat; print(chat('Say hello'))"
 RECALLBOT_RUN_ID=r02 python -m src.llm_smoke
 ```
 
+The dialogue loop is `python -m src.agent "Can someone come to my desk?"`. Slot questions and the confirmation are fixed lines. A tool result is phrased at temperature 0, and an open turn (a greeting, a noted fact, a refusal) is reworded at temperature 0.7 and top-p 0.9. Both read `skills/system_prompt_v1.md`; the booking steps are added only for a visit. The diagram is `docs/architecture.md`.
+
 ## Layout
 
 | Path | Role |
 |---|---|
 | `src/` | Pipeline code. `config.py`, `logger.py`, `llm.py` land in Step 1 |
-| `skills/` | Versioned system prompt and slot-filling steps (Step 5) |
+| `skills/` | `system_prompt_v1.md` and `book_slot_steps_v1.md`, loaded from disk by `load_skill()` on every reply |
 | `tests/` | pytest, including the Step 1 log and config checks |
 | `data/kb/` | IT helpdesk documents (Step 2) |
 | `db/` | SQLite helpdesk database (Step 5) |

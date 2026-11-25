@@ -101,10 +101,12 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
   - Checked: PASS, every line ok.
 
 ## 4. Retrieval: chunking, embeddings, BM25, RRF · Task 3(a), 3(b) (2.5 marks) · depends on 2, 3
-- [ ] `src/chunker.py`: split by token count at 2 sizes (128 and 512) with about 15% overlap, using the chat model's tokenizer
-- [ ] Store metadata with each chunk: `doc_id`, `section`, `version`, `valid_from`, `status`
-- [ ] `src/embedder.py`: MiniLM with mean pooling and normalised vectors; log every embedding call
-- [ ] `src/vector_index.py`: a flat FAISS index (justify it: a small corpus needs exact search), with metadata saved to `index/`
+- [x] `src/chunker.py`: split by token count at 2 sizes (128 and 512) with about 15% overlap, using the chat model's tokenizer
+  - Overlap is 19/128 and 77/512 (about 15%). `data/chunks.jsonl` has both sizes.
+- [x] Store metadata with each chunk: `doc_id`, `section`, `version`, `valid_from`, `status`
+- [x] `src/embedder.py`: MiniLM with mean pooling and normalised vectors; log every embedding call
+- [x] `src/vector_index.py`: a flat FAISS index (justify it: a small corpus needs exact search), with metadata saved to `index/`
+  - `index/kb.faiss` is `IndexFlatIP`; chunk metadata is `index/kb_meta.jsonl`.
 - [x] `src/bm25.py`: my own BM25 (k1, b, IDF)
 - [x] `src/rrf.py`: my own RRF with k=60
 - [x] `tests/test_bm25.py`: reproduce the CS4 example score of **4.160**
@@ -117,9 +119,11 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 - [x] `python -m pytest tests/` passes
 
 **✅ Validate:** `pytest tests/test_bm25.py tests/test_rrf.py` passes (4.160 and A, B, C, D, then E and F tied); `grep` finds no `rank_bm25`, LangChain or LlamaIndex imports in `src/`; chunk overlap measures 10–20%; `results/hit_rate.csv` has 6 method × size rows plus the code and reworded rows, with hit rate never falling as the cut-off grows (top 1 ≤ top 3 ≤ top 5); `logs/calls.jsonl` contains embedding calls.
+  - Checked: `tests/test_bm25.py`, `tests/test_rrf.py`, `tests/test_search.py` and `tests/test_eval_retrieval.py`. `results/hit_rate.csv` and `results/hybrid_cases.json` exist. No `rank_bm25`, LangChain or LlamaIndex import in `src/`.
 
 ## 5. Dialogue pipeline and procedural memory · Task 2(a) (1.5 marks) · depends on 4
-- [ ] `db/helpdesk.sqlite`: tables `tickets`, `slots`, `assets`, each with an `owner_user` column
+- [x] `db/helpdesk.sqlite`: tables `tickets`, `slots`, `assets`, each with an `owner_user` column
+  - Created by `src/db.py`. The sqlite file is gitignored and rebuilt with `python -m src.db`.
 - [x] `src/tools.py`:
   - `search_kb(query)`
   - `get_ticket(ticket_id, user)` checks the owner, for isolation
@@ -130,14 +134,21 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
   - Rules label a bare yes, no, or ticket id and make no model call. Everything else is one `chat()` call at temperature 0 with `call_type` "nlu".
 - [x] `data/nlu_labelled.json`: 20+ labelled messages, plus a script that measures accuracy
   - 24 messages covering all 8 intents. `python -m src.eval_nlu`: 24/24 correct (accuracy 1.000). `pytest tests/test_nlu.py`: 8 passed.
-- [ ] `src/state_tracker.py`: fields `user`, `intent`, `slots{asset_id, issue_type, location, date, time}`, `pending_confirmation`, `last_entities`, `turn`
-- [ ] `src/dialogue_manager.py`: the main loop. It fills missing slots, asks a clarifying question when needed, and confirms before any write
-- [ ] `src/nlg.py`: fixed templates for confirmations and slot questions, the LLM for open answers
-- [ ] `skills/system_prompt_v1.md` (persona, scope, error handling, output format) and `skills/book_slot_steps_v1.md`, both loaded at run time
-- [ ] Decoding settings: temperature 0 for task turns; temperature 0.7 and top-p 0.9 for open turns. Write down why
-- [ ] Draw the architecture diagram (mermaid), labelled with real function names
+- [x] `src/state_tracker.py`: fields `user`, `intent`, `slots{asset_id, issue_type, location, date, time}`, `pending_confirmation`, `last_entities`, `turn`
+  - These fields live on `Session` in `src/agent.py` (`slots`, `pending_booking`, `awaiting_confirmation`, `history`, `turn`). Not split into its own file: the loop and the templates share one object.
+- [x] `src/dialogue_manager.py`: the main loop. It fills missing slots, asks a clarifying question when needed, and confirms before any write
+  - `Session.ingest`, `Session.decide` and `Session.reply` in `src/agent.py`. `book_it_slot` runs only on the confirm turn.
+- [x] `src/nlg.py`: fixed templates for confirmations and slot questions, the LLM for open answers
+  - `BOOKING_ASKS`, `CONFIRM_BOOKING` and `REPLIES` in `src/agent.py`. Slot questions are returned as written. An open turn is reworded by the model.
+- [x] `skills/system_prompt_v1.md` (persona, scope, error handling, output format) and `skills/book_slot_steps_v1.md`, both loaded at run time
+  - `load_skill()` reads both on every reply. The booking steps are added only while a visit is being booked or confirmed.
+- [x] Decoding settings: temperature 0 for task turns; temperature 0.7 and top-p 0.9 for open turns. Write down why
+  - Task turns (a tool result) use temperature 0 so a ticket id or a booked time is stable. Open turns use 0.7 and top-p 0.9 because there is no fact to pin down and a little wording variety is harmless. NLU and the rolling summary stay at 0, since both must be repeatable.
+- [x] Draw the architecture diagram (mermaid), labelled with real function names
+  - `docs/architecture.md`: `understand`, `Session.ingest`, `Session.decide`, `Session.reply`, `search_kb`, `book_it_slot`.
 
 **✅ Validate:** `pytest tests/test_pipeline.py` passes the scripted booking flow: the slot questions are asked, there is **no** database row before "yes" and exactly one row after, `get_ticket` as U2 on U1's ticket returns "not found", and the NLU script reports its accuracy on 20+ labelled messages; the log shows `tool` calls with 0 tokens, and the skill files are loaded from disk.
+  - Checked: the booking flow, the owner check and the zero-token tool lines are in `tests/test_agent.py` and `tests/test_tools.py` (49 agent tests pass, no live model). NLU accuracy is `python -m src.eval_nlu` on 24 messages. Skill files are loaded from disk, covered by `test_a_tool_reply_loads_both_skill_files_while_booking` and `test_an_open_turn_is_reworded_and_reads_the_skill_file`.
 
 ## 6. Short-term memory strategies · Task 2(b), 2(c) (2.5 marks) · depends on 5
 - [ ] `src/history.py` with three strategies:

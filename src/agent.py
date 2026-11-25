@@ -65,7 +65,10 @@ ACTION_NONE = "none"
 REPLIES = {
     "reject": "Okay, I won't book that.",
     "provide_info": "Thanks, I'll keep that in mind.",
-    "out_of_scope": "I can only help with IT issues.",
+    "out_of_scope": "I can only help with IT issues. What can I help you with?",
+    # Used instead of out_of_scope when the message is nothing but a hello,
+    # so "Hi" is answered with "Hi" and a payroll question is not.
+    "greeting": "Hi. I can only help with IT issues. What can I help you with?",
     "confirm": "There is nothing waiting to book.",
     "fix_issue": "That is already raised.",
     # Said when the user asks about themselves and nothing stored matches.
@@ -80,18 +83,40 @@ FACT_REPLIES = {
     "asset_id": "You use {value}.",
 }
 
-# The model phrases a tool result. It must not call a tool, and it must not
-# add a fact that is not in the result it is shown.
-REPLY_SYSTEM = """You are the IT helpdesk. Write the one reply the user will read.
+# The reply instructions live in skills/ and are read from disk on each
+# reply, so editing the file changes the next session without a code change.
+# system_prompt_v1.md is the persona. book_slot_steps_v1.md is how a visit
+# is gathered; it is included only while a booking is in progress, because
+# a password question has no use for it.
+from src.config import ROOT
 
-You are given the user's message and the result of a tool that has already run. Use only that result.
-- Do not call a tool, do not invent a ticket id, a time, or a place, and do not add a step the result does not state.
-- If the result is a knowledge-base passage, answer from it in one or two sentences and name the document it came from.
-- If the result says nothing relevant was found, say you don't know. Do not guess.
-- If the result is a ticket, report its id, its status, and the issue.
-- If the result is a booking, report the booking id, the place, the day, the time, and the status. The user asked about the visit. Do not mention the issue, the fault, or the ticket, even if the result includes an issue line.
-- Write the reply only. No JSON, no preamble.
-"""
+SKILLS_DIR = ROOT / "skills"
+SYSTEM_PROMPT_PATH = SKILLS_DIR / "system_prompt_v1.md"
+BOOKING_STEPS_PATH = SKILLS_DIR / "book_slot_steps_v1.md"
+
+
+def load_skill(path) -> str:
+    """The text of one skill file. Missing or empty is an error, not a blank prompt."""
+    text = path.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"skill file is empty: {path}")
+    return text
+
+
+def reply_system(booking: bool) -> str:
+    """The system prompt for one reply, loaded from skills/ at call time."""
+    text = load_skill(SYSTEM_PROMPT_PATH)
+    if booking:
+        text = f"{text}\n\n{load_skill(BOOKING_STEPS_PATH)}"
+    return text
+
+
+# Task turns are phrased at temperature 0: a ticket id or a booked time must
+# come out the same way on every run. An open turn (a greeting, a fact just
+# noted, a refusal) has no fact to pin down, so it uses a little variety.
+TASK_TEMPERATURE = 0.0
+OPEN_TEMPERATURE = 0.7
+OPEN_TOP_P = 0.9
 
 # Shown to the model when retrieval found nothing above the relevance cut-off.
 # The model is not handed a weak passage it might quote as if it were an answer.
@@ -113,6 +138,20 @@ CARRIED_SLOTS = (
 # "What was the last issue I raised?" and "my last booking" name no id.
 # The model files both under check_ticket or recall_fact. A booking word
 # reads the newest visit; anything else about a ticket reads the newest ticket.
+# A message that is only a hello. "Hi, my VPN is down" is a fault, not a
+# greeting, because the words after the hello are still there.
+_GREETING = re.compile(
+    r"^\s*(?:hi|hello|hey|hiya|howdy|good\s+(?:morning|afternoon|evening))"
+    r"(?:\s+there)?\s*[!.?]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_greeting(text: str) -> bool:
+    """True when the message is only a hello, with no request after it."""
+    return _GREETING.match(text or "") is not None
+
+
 _LAST_BOOKING = re.compile(
     r"\b(?:last|latest|recent|previous|my)\b.{0,40}\b(?:booking|visit|appointment|slot)\b"
     r"|\b(?:booking|visit|appointment|slot)\b.{0,40}\b(?:last|latest|recent|previous)\b"
@@ -628,10 +667,12 @@ class Session:
     def reply(self, text: str, decision: dict) -> str:
         """The one sentence the user reads for this turn.
 
-        An ask is already that sentence, and a turn that called nothing has
-        a fixed line. Both return without a model call and without a log
-        line. A tool result is phrased by chat() at temperature 0, which logs
-        one line with call_type "reply" and the API's own token counts.
+        An ask is already that sentence, so it is returned with no model
+        call. A turn that called nothing is an open turn: the fixed line is
+        reworded by chat() at temperature 0.7 and top-p 0.9. A tool result
+        is a task turn, phrased by chat() at temperature 0. Both model calls
+        log one line with call_type "reply" and the API's own token counts,
+        and both read their instructions from skills/.
         """
         action = decision.get("action")
         if action == ACTION_ASK:
@@ -639,8 +680,7 @@ class Session:
             self._log_exchange(text, said)
             return said
         if action == ACTION_NONE:
-            intent = self.history[-1]["intent"] if self.history else ""
-            said = REPLIES.get(intent, REPLIES["out_of_scope"])
+            said = self._open_reply(text)
             self._log_exchange(text, said)
             return said
         if action != ACTION_TOOL:
@@ -676,18 +716,56 @@ class Session:
             raise ValueError(f"unknown tool: {name!r}")
 
         prompt = f"User message: {text}\n\nTool result:\n{shown}"
+        # A tool result is a task turn: temperature 0. The booking steps are
+        # included when the reply confirms a visit that was just written, or
+        # while one is still being collected. A ticket lookup is neither.
+        booking = self.pending_booking or name in ("book_it_slot", "update_slot")
         said = chat(
             prompt,
-            system=REPLY_SYSTEM,
-            temperature=0.0,
+            system=reply_system(booking=booking),
+            temperature=TASK_TEMPERATURE,
             call_type="reply",
             user=self.user,
             session=self.session,
             turn=self.turn,
             trace=self.calls,
         ).strip()
+        if name in ("book_it_slot", "update_slot"):
+            # The visit is written. Drop the day and time so the next visit
+            # cannot reuse them, after the reply has used them.
+            self.note_booked()
         self._log_exchange(text, said)
         return said
+
+    def _open_reply(self, text: str) -> str:
+        """Phrase a turn that called no tool.
+
+        The fixed line is what must be said (a refusal, a stored "thanks").
+        It is handed to the model as the required reply, at temperature 0.7
+        and top-p 0.9, so the wording can vary while the meaning cannot.
+        The persona is read from skills/ for this call too.
+        """
+        intent = self.history[-1]["intent"] if self.history else ""
+        # A bare hello shares the out_of_scope intent with a payroll question.
+        # Only the hello gets the greeting line, so the refusal stays a refusal.
+        if intent == "out_of_scope" and is_greeting(text):
+            intent = "greeting"
+        required = REPLIES.get(intent, REPLIES["out_of_scope"])
+        prompt = (
+            f"User message: {text}\n\n"
+            f"Required reply, which you may reword but must not change the meaning of:\n{required}"
+        )
+        return chat(
+            prompt,
+            system=reply_system(booking=False),
+            temperature=OPEN_TEMPERATURE,
+            top_p=OPEN_TOP_P,
+            call_type="reply",
+            user=self.user,
+            session=self.session,
+            turn=self.turn,
+            trace=self.calls,
+        ).strip()
 
     def _log_exchange(self, user_text: str, reply: str) -> None:
         """Append this turn to the session's JSON file.

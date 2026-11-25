@@ -17,10 +17,16 @@ from src.agent import (
     ACTION_TOOL,
     BOOKING_ASKS,
     BOOKING_SLOTS,
+    BOOKING_STEPS_PATH,
     CONFIRM_BOOKING,
     NO_PASSAGE,
+    OPEN_TEMPERATURE,
+    OPEN_TOP_P,
     REPLIES,
+    is_greeting,
+    SYSTEM_PROMPT_PATH,
     Session,
+    load_skill,
 )
 from src.config import LOG_PATH
 from src.db import connect
@@ -949,7 +955,7 @@ def test_a_ticket_that_is_not_the_users_is_phrased_as_not_found(monkeypatch, tmp
     assert ticket_id not in seen["prompt"]
 
 
-def test_a_turn_with_nothing_to_do_uses_a_fixed_line(monkeypatch, tmp_path):
+def test_an_open_turn_is_reworded_and_reads_the_skill_file(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",
         _scripted(
@@ -962,12 +968,13 @@ def test_a_turn_with_nothing_to_do_uses_a_fixed_line(monkeypatch, tmp_path):
             }
         ),
     )
+    seen = []
 
-    def fail(*args, **kwargs):
-        raise AssertionError("a turn with nothing to do must not call the model")
+    def fake(prompt, **kwargs):
+        seen.append({"prompt": prompt, **kwargs})
+        return "reworded: " + prompt.splitlines()[-1]
 
-    monkeypatch.setattr("src.agent.chat", fail)
-    before = _log_len()
+    monkeypatch.setattr("src.agent.chat", fake)
     session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
 
     session.ingest("Hope your day is going well!")
@@ -977,10 +984,59 @@ def test_a_turn_with_nothing_to_do_uses_a_fixed_line(monkeypatch, tmp_path):
     session.ingest("no")
     declined = session.reply("no", session.decide("no"))
 
-    assert greeting == REPLIES["out_of_scope"]
-    assert noted == REPLIES["provide_info"]
-    assert declined == REPLIES["reject"]
-    assert _log_len() == before
+    # "Hope your day is going well!" is out of scope but not a hello, so it
+    # gets the plain refusal rather than the greeting line.
+    assert REPLIES["out_of_scope"] in greeting
+    assert REPLIES["greeting"] not in greeting
+    assert REPLIES["provide_info"] in noted
+    assert REPLIES["reject"] in declined
+    assert len(seen) == 3
+    for call in seen:
+        assert call["temperature"] == 0.7
+        assert call["top_p"] == 0.9
+        assert call["call_type"] == "reply"
+        # The persona was read from skills/system_prompt_v1.md, not inlined.
+        assert "corporate IT helpdesk" in call["system"]
+        # An open turn is not a booking, so the slot steps stay out.
+        assert "Shall I book that visit?" not in call["system"]
+
+
+def test_only_a_bare_hello_is_answered_with_hi(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Hi": {"intent": "out_of_scope"},
+                "Good morning!": {"intent": "out_of_scope"},
+                "Hi, my VPN is down.": {"intent": "out_of_scope"},
+                "What's for lunch?": {"intent": "out_of_scope"},
+            }
+        ),
+    )
+
+    def fake(prompt, **kwargs):
+        return prompt.splitlines()[-1]
+
+    monkeypatch.setattr("src.agent.chat", fake)
+
+    def said(text: str) -> str:
+        session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+        session.ingest(text)
+        return session.reply(text, session.decide(text))
+
+    assert is_greeting("Hi")
+    assert is_greeting("Hello!")
+    assert is_greeting("Hey there")
+    assert is_greeting("Good morning!")
+    assert not is_greeting("Hi, my VPN is down.")
+    assert not is_greeting("What's for lunch?")
+
+    assert said("Hi") == REPLIES["greeting"]
+    assert said("Good morning!") == REPLIES["greeting"]
+    # A hello with a request after it, and a plain off-topic question, both
+    # stay refusals. Neither is answered with "Hi".
+    assert said("Hi, my VPN is down.") == REPLIES["out_of_scope"]
+    assert said("What's for lunch?") == REPLIES["out_of_scope"]
 
 
 def test_yes_is_phrased_from_the_row_that_was_written(monkeypatch, tmp_path):
@@ -1081,11 +1137,6 @@ def test_a_stated_fact_is_recalled_by_a_later_session(monkeypatch, tmp_path):
     monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
     monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
 
-    def fail(*args, **kwargs):
-        raise AssertionError("a recalled fact is a fixed line, not a model call")
-
-    monkeypatch.setattr("src.agent.chat", fail)
-
     first = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
     first.ingest("I sit at the Pune office.")
 
@@ -1170,9 +1221,12 @@ def test_a_reply_is_appended_to_that_sessions_json_file(monkeypatch, tmp_path):
     saved = json.loads(session.memory.conversation.path.read_text(encoding="utf-8"))
     assert saved["user"] == "U1"
     assert saved["session"] == "S-1"
-    assert saved["turns"] == [
-        {"turn": 1, "user": text, "bot": said, "intent": "out_of_scope", "calls": []}
-    ]
+    assert saved["turns"][0]["turn"] == 1
+    assert saved["turns"][0]["user"] == text
+    assert saved["turns"][0]["bot"] == said
+    assert saved["turns"][0]["intent"] == "out_of_scope"
+    # An open turn is one reply call, logged beside the sentence.
+    assert saved["turns"][0]["calls"][0]["call_type"] == "reply"
 
     other = Session("U1", "S-2", memory=Memory("U1", "S-2", root=tmp_path))
     other.ingest(text)
@@ -1527,3 +1581,60 @@ def test_booking_details_are_phrased_without_the_issue(monkeypatch, tmp_path):
     assert "Thursday" in seen["prompt"]
     assert "4 pm" in seen["prompt"]
 
+
+
+def test_a_tool_reply_loads_both_skill_files_while_booking(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Pune office, Thursday at 4 pm.": {
+                    "intent": "book_slot",
+                    "slots": {"location": "Pune office", "date": "Thursday", "time": "4 pm"},
+                },
+            }
+        ),
+    )
+    seen = {}
+
+    def fake(prompt, **kwargs):
+        seen.update(kwargs)
+        return "Booked."
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session(
+        "U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path)
+    )
+    session.ingest("Pune office, Thursday at 4 pm.")
+    session.decide("Pune office, Thursday at 4 pm.")
+    session.ingest("yes")
+    session.reply("yes", session.decide("yes"))
+
+    persona = load_skill(SYSTEM_PROMPT_PATH)
+    steps = load_skill(BOOKING_STEPS_PATH)
+    assert persona in seen["system"]
+    assert steps in seen["system"]
+    assert seen["temperature"] == 0.0
+    assert "top_p" not in seen
+
+
+def test_a_knowledge_reply_loads_the_persona_but_not_the_booking_steps(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"What does ERR-VPN-809 mean?": {"intent": "ask_kb"}}),
+    )
+    seen = {}
+
+    def fake(prompt, **kwargs):
+        seen.update(kwargs)
+        return "From the VPN guide."
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    text = "What does ERR-VPN-809 mean?"
+    session.ingest(text)
+    session.reply(text, session.decide(text))
+
+    assert load_skill(SYSTEM_PROMPT_PATH) in seen["system"]
+    assert "desk-side visit" not in seen["system"]
+    assert seen["temperature"] == 0.0
