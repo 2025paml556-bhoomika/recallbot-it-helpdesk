@@ -159,7 +159,14 @@ class Memory:
         """
         if intent in _SKIP_INTENTS:
             return []
-        return self.semantic.extract(self.user, text, slots, turn)
+        # book_slot states where a visit should happen, not where the user
+        # sits. Writing it would make the next "come to my desk" skip the
+        # office question, and "where do I sit?" would answer with a desk
+        # the user never claimed.
+        remembered = dict(slots) if isinstance(slots, dict) else {}
+        if intent == "book_slot":
+            remembered.pop("location", None)
+        return self.semantic.extract(self.user, text, remembered, turn)
 
     def remember_event(self, text: str, episode_type: str, turn: int | None = None) -> dict | None:
         """Append one episode for something that just happened, such as a ticket."""

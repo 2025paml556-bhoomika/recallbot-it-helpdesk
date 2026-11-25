@@ -40,6 +40,14 @@ def test_rules_label_yes_no_and_a_bare_ticket_without_logging():
     assert yes["source"] == "rule"
     assert all(value is None for value in yes["slots"].values())
 
+    # "ok" is thanks, not another yes. A confirm with nothing pending says
+    # there is nothing waiting to book.
+    ok = understand("ok")
+    assert ok["intent"] == "out_of_scope"
+    assert ok["source"] == "rule"
+    okay = understand("Okay.")
+    assert okay["intent"] == "out_of_scope"
+
     no = understand("no")
     assert no["intent"] == "reject"
     assert no["source"] == "rule"
@@ -116,7 +124,7 @@ def test_a_pending_question_is_sent_with_the_reply(monkeypatch):
         pending_question="Which office, floor, and desk should the engineer come to?",
     )
     assert result["intent"] == "book_slot"
-    assert result["slots"]["location"] == "Pune office, floor 2, desk 1"
+    assert result["slots"]["location"] == "Pune office, floor 2 and desk 1"
     assert seen["prompt"] == (
         "The assistant just asked: Which office, floor, and desk should the engineer come to?\n"
         "The user replied: Pune office, floor 2 and desk 1."
@@ -182,3 +190,56 @@ def test_changing_the_timing_is_not_treated_as_a_details_request(monkeypatch):
     result = understand("change the timing of my last booking")
     assert result["intent"] == "book_slot"
 
+
+def test_the_slot_rules_forbid_copying_an_example(monkeypatch):
+    seen = {}
+
+    def fake_chat(prompt, **kwargs):
+        seen["system"] = kwargs.get("system")
+        return '{"intent": "book_slot", "slots": {}}'
+
+    monkeypatch.setattr("src.nlu.chat", fake_chat)
+    understand("Can you come to my desk?")
+    assert "Do not copy a place" in seen["system"]
+    assert "Can you come to my desk?" in seen["system"]
+    assert "location is null" in seen["system"]
+
+
+
+def test_a_place_answer_keeps_the_floor_and_the_desk(monkeypatch):
+    # qwen2.5:3b keeps the city and drops the floor and the desk.
+    payload = json.dumps({
+        "intent": "book_slot",
+        "slots": {"location": "Pune office"},
+    })
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand(
+        "Pune office , 3rd floor, 212 desk",
+        pending_question="Which office, floor, and desk should the engineer come to?",
+    )
+    assert result["intent"] == "book_slot"
+    assert result["slots"]["location"] == "Pune office , 3rd floor, 212 desk"
+    assert result["slots"]["date"] is None
+    assert result["slots"]["time"] is None
+
+
+def test_a_place_rule_does_not_rewrite_a_standing_office(monkeypatch):
+    payload = json.dumps({
+        "intent": "provide_info",
+        "slots": {"location": "Pune office"},
+    })
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand("I sit at the Pune office.")
+    assert result["intent"] == "provide_info"
+    assert result["slots"]["location"] == "Pune office"
+
+
+def test_a_day_answer_is_not_stored_as_the_place(monkeypatch):
+    payload = json.dumps({"intent": "book_slot", "slots": {"date": "Monday"}})
+    monkeypatch.setattr("src.nlu.chat", lambda *args, **kwargs: payload)
+    result = understand(
+        "Monday",
+        pending_question="Which office, floor, and desk should the engineer come to?",
+    )
+    assert result["slots"]["location"] is None
+    assert result["slots"]["date"] == "Monday"

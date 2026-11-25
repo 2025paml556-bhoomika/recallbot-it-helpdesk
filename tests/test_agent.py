@@ -998,7 +998,7 @@ def test_an_open_turn_is_reworded_and_reads_the_skill_file(monkeypatch, tmp_path
         # The persona was read from skills/system_prompt_v1.md, not inlined.
         assert "corporate IT helpdesk" in call["system"]
         # An open turn is not a booking, so the slot steps stay out.
-        assert "Shall I book that visit?" not in call["system"]
+        assert "desk-side visit" not in call["system"]
 
 
 def test_only_a_bare_hello_is_answered_with_hi(monkeypatch, tmp_path):
@@ -1618,6 +1618,40 @@ def test_a_tool_reply_loads_both_skill_files_while_booking(monkeypatch, tmp_path
     assert "top_p" not in seen
 
 
+def test_a_written_visit_is_reported_as_booked(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Pune office, Thursday at 4 pm.": {
+                    "intent": "book_slot",
+                    "slots": {"location": "Pune office", "date": "Thursday", "time": "4 pm"},
+                },
+            }
+        ),
+    )
+
+    def fake(prompt, **kwargs):
+        # What the model must be told: the visit is already written, and the
+        # confirmation question is not the reply to that result.
+        assert "Booked slot" in prompt
+        assert "already booked" in kwargs["system"]
+        return "Booked slot 1 at Pune office on Thursday at 4 pm."
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session(
+        "U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path)
+    )
+    session.ingest("Pune office, Thursday at 4 pm.")
+    session.decide("Pune office, Thursday at 4 pm.")
+    session.ingest("yes")
+    said = session.reply("yes", session.decide("yes"))
+    assert said.startswith("Booked slot")
+    # A second yes has nothing left to confirm.
+    session.ingest("yes")
+    assert session.decide("yes") == {"action": ACTION_NONE}
+
+
 def test_a_knowledge_reply_loads_the_persona_but_not_the_booking_steps(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",
@@ -1638,3 +1672,110 @@ def test_a_knowledge_reply_loads_the_persona_but_not_the_booking_steps(monkeypat
     assert load_skill(SYSTEM_PROMPT_PATH) in seen["system"]
     assert "desk-side visit" not in seen["system"]
     assert seen["temperature"] == 0.0
+
+
+def test_a_booking_reply_that_asks_again_is_replaced_by_the_written_row(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Pune office, 3rd floor, desk 14 on Thursday at 4 pm.": {
+                    "intent": "book_slot",
+                    "slots": {
+                        "location": "Pune office, 3rd floor, desk 14",
+                        "date": "Thursday",
+                        "time": "4 pm",
+                    },
+                },
+            }
+        ),
+    )
+
+    def fake(prompt, **kwargs):
+        return "The engineer will come to the Pune office on Thursday at 4 pm. Shall I book that visit?"
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session(
+        "U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path)
+    )
+    session.ingest("Pune office, 3rd floor, desk 14 on Thursday at 4 pm.")
+    session.decide("Pune office, 3rd floor, desk 14 on Thursday at 4 pm.")
+    session.ingest("yes")
+    said = session.reply("yes", session.decide("yes"))
+    assert said == "Booked the visit at Pune office, 3rd floor, desk 14 on Thursday at 4 pm."
+    assert "?" not in said
+    session.ingest("yes")
+    assert session.decide("yes") == {"action": ACTION_NONE}
+
+
+def test_a_booking_reply_that_already_reports_the_row_is_kept(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Pune office, Thursday at 4 pm.": {
+                    "intent": "book_slot",
+                    "slots": {"location": "Pune office", "date": "Thursday", "time": "4 pm"},
+                },
+            }
+        ),
+    )
+
+    def fake(prompt, **kwargs):
+        return "Booked slot 1 at Pune office on Thursday at 4 pm."
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session(
+        "U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path)
+    )
+    session.ingest("Pune office, Thursday at 4 pm.")
+    session.decide("Pune office, Thursday at 4 pm.")
+    session.ingest("yes")
+    said = session.reply("yes", session.decide("yes"))
+    assert said == "Booked slot 1 at Pune office on Thursday at 4 pm."
+
+
+def test_ok_after_a_booking_is_thanks_not_nothing_waiting(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "Pune office, Thursday at 4 pm.": {
+                    "intent": "book_slot",
+                    "slots": {"location": "Pune office", "date": "Thursday", "time": "4 pm"},
+                },
+            }
+        ),
+    )
+
+    def fake(prompt, **kwargs):
+        return prompt.splitlines()[-1]
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session(
+        "U1", "A", db_path=tmp_path / "helpdesk.sqlite", memory=Memory("U1", "A", root=tmp_path)
+    )
+    session.ingest("Pune office, Thursday at 4 pm.")
+    session.decide("Pune office, Thursday at 4 pm.")
+    session.ingest("yes")
+    session.reply("yes", session.decide("yes"))
+
+    session.ingest("ok")
+    decision = session.decide("ok")
+    assert decision == {"action": ACTION_NONE}
+    said = session.reply("ok", decision)
+    assert said == REPLIES["ack"]
+    assert "nothing waiting" not in said.lower()
+    assert _rows(tmp_path / "helpdesk.sqlite", "slots").__len__() == 1
+
+
+def test_ok_with_nothing_booked_is_still_not_a_refusal(monkeypatch, tmp_path):
+    def fake(prompt, **kwargs):
+        return prompt.splitlines()[-1]
+
+    monkeypatch.setattr("src.agent.chat", fake)
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("ok")
+    said = session.reply("ok", session.decide("ok"))
+    assert said == REPLIES["ack"]
+    assert REPLIES["out_of_scope"] not in said

@@ -59,7 +59,13 @@ ASSET_RE = re.compile(r"\bLAP-[A-Z0-9]+\b", re.IGNORECASE)
 ERROR_RE = re.compile(r"\b(?:" + "|".join(ERROR_CODES) + r")\b", re.IGNORECASE)
 
 _YES = re.compile(
-    r"^(yes|yeah|yep|ok|okay|sure|go ahead|please do|book it|confirm)[\s.!]*$",
+    r"^(yes|yeah|yep|sure|go ahead|please do|book it|confirm)[\s.!]*$",
+    re.IGNORECASE,
+)
+# "ok" after a booking is an acknowledgement, not another yes. It must not
+# be labelled confirm, which replies "there is nothing waiting to book".
+_ACK = re.compile(
+    r"^(ok|okay|thanks|thank you|thx|cheers|got it|alright|cool)[\s.!]*$",
     re.IGNORECASE,
 )
 _NO = re.compile(
@@ -115,15 +121,16 @@ Intent meanings:
 - fix_issue: something is broken and the user wants it fixed or raised as a ticket
 - ask_kb: a question about a policy, an error code, a procedure, or how something works
 - book_slot: the user is asking for a visit, answering a booking question with a place, a floor, a desk, a day, or a time, or changing the time, day, or place of a visit they already booked. A short reply that is only a place or a time is book_slot, not provide_info. When the message says the assistant just asked for an office, a floor, a desk, a day, or a time, the user's reply is the answer to that question: label it book_slot, never provide_info, and copy the place, day, or time into the matching slot. "Can I change the timing of my booking?", "Reschedule my visit", and "Move it to 4 pm" are book_slot, never out_of_scope and never provide_info. If they name a new time, day, or place, copy it into that slot. If they only ask to change it and name nothing new, leave that slot null.
-- confirm: the user agrees to go ahead, including "yes", "go ahead", and "book that"
+- confirm: the user agrees to go ahead, including "yes", "go ahead", and "book that". "ok" and "okay" are not confirm.
 - reject: the user says no, or withdraws a day or a booking, including "no" and "leave Friday"
 - check_ticket: the user asks about an existing ticket, or about the last issue they raised, or about a visit that was already booked. "What was the last issue I raised?", "What is the last ticket I raised?", "Is there any ticket raised for me?", "What is my last booking?", and "Share the details of booking" are check_ticket, never book_slot and never recall_fact. Leave ticket_id null unless they named an id such as TCK-0001.
 - provide_info: the user introduces themselves or states or changes a standing fact (their name, their laptop model, which office they sit in, their manager). A request to change their own office is provide_info, not out_of_scope and not book_slot. "Update my location from Pune to Gurugram", "I have shifted from Pune to Gurugram", and "Change my office to Gurugram" are provide_info. Put only the new place in location, for example "Gurugram", and leave every other slot null. A question is never provide_info.
 - recall_fact: the user asks what you already know about them, such as "Where do I sit?" or "Which laptop do I use?". They are not stating a new fact and they are not asking about a policy. A question about a ticket, an issue they raised, or a booking is check_ticket, not recall_fact. Every slot stays null.
-- out_of_scope: not an IT helpdesk matter. Greetings, thanks, and "hope your day is going well" are out_of_scope, not provide_info. Changing the user's own office, desk, or laptop is provide_info, never out_of_scope. Changing the time, day, or place of a booked visit is book_slot, never out_of_scope.
+- out_of_scope: not an IT helpdesk matter. Greetings, thanks, "ok", "okay", and "hope your day is going well" are out_of_scope, not provide_info and not confirm. Changing the user's own office, desk, or laptop is provide_info, never out_of_scope. Changing the time, day, or place of a booked visit is book_slot, never out_of_scope.
 
 A question about policy, a cycle, a model the user would get, or how something works is ask_kb, even if it mentions a laptop or a printer.
 "desk 14" is part of the location, not a time. time is only a clock time such as "4 pm".
+location is the whole place the user named, not the city alone. Copy the office, the floor, and the desk together. "Pune office, 3rd floor, 212 desk" has location "Pune office, 3rd floor, 212 desk", never "Pune office". "floor 2 and desk 1" stays inside location. Do not drop a floor or a desk number.
 
 Reply with the JSON object only. Examples:
 "Make it Thursday at 4 pm." -> {"intent": "book_slot", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": "Thursday", "time": "4 pm", "asset_id": null, "ticket_id": null}}
@@ -135,7 +142,8 @@ Reply with the JSON object only. Examples:
 "Share the details of booking" -> {"intent": "check_ticket", "slots": {"issue_type": null, "error_code": null, "urgency": null, "location": null, "date": null, "time": null, "asset_id": null, "ticket_id": null}}
 
 Rules for slots:
-- Copy only what the user stated. Use null for anything they did not state.
+- Copy only what the user stated in this message. Use null for anything they did not state.
+- Do not copy a place, a day, a time, a desk number, an office, or a code from the examples. The examples show the shape of the JSON, not facts about this user. "Can you come to my desk?" names no desk number, so location is null. Leave a slot null and let the next turn ask for it.
 - error_code, asset_id and ticket_id must be copied exactly, or be null.
 - Do not answer the user's question. Do not add keys. Do not wrap the JSON in markdown.
 """
@@ -154,6 +162,8 @@ def _rule_based(text: str) -> dict | None:
     stripped = text.strip()
     if _YES.match(stripped):
         return {"intent": "confirm", "slots": empty_slots(), "source": "rule"}
+    if _ACK.match(stripped):
+        return {"intent": "out_of_scope", "slots": empty_slots(), "source": "rule"}
     if _NO.match(stripped):
         return {"intent": "reject", "slots": empty_slots(), "source": "rule"}
 
@@ -204,6 +214,47 @@ def _normalise(parsed: dict) -> dict:
             continue
         slots[name] = value.strip()
     return {"intent": intent, "slots": slots, "source": "llm"}
+
+
+# A place the user named while answering "which office, floor, and desk?".
+# The model often keeps only the city ("Pune office") and drops the floor
+# and the desk. The whole reply is the place when the question asked for one
+# and the reply itself is not a day or a clock time.
+_PLACE_QUESTION = re.compile(r"\b(?:office|floor|desk)\b", re.IGNORECASE)
+_CLOCK_TIME = re.compile(
+    r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b(?:morning|afternoon|evening|noon)\b",
+    re.IGNORECASE,
+)
+_WEEKDAY = re.compile(
+    r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_place(text: str) -> bool:
+    """True when the sentence names a place and is not only a day or a time."""
+    stripped = text.strip()
+    if not stripped or _CLOCK_TIME.search(stripped) or _WEEKDAY.search(stripped):
+        return False
+    return _PLACE_QUESTION.search(stripped) is not None
+
+
+def _keep_full_place(text: str, result: dict, pending_question: str | None) -> dict:
+    """Put the floor and the desk back when the model kept only the city.
+
+    Runs only on the answer to the place question. A standing "I sit at the
+    Pune office" is not rewritten, and a day or a time is left in its slot.
+    """
+    question = pending_question or ""
+    if not _PLACE_QUESTION.search(question):
+        return result
+    if not _looks_like_place(text):
+        return result
+    result["intent"] = "book_slot"
+    result["slots"]["location"] = re.sub(r"\s+", " ", text).strip(" .")
+    result["slots"]["date"] = None
+    result["slots"]["time"] = None
+    return result
 
 
 # The labelled set writes locations in one form. The model paraphrases
@@ -326,7 +377,8 @@ def understand(
         trace=trace,
     )
     result = _normalise(_extract_json(reply))
-    return _apply_known_codes(text, result)
+    result = _apply_known_codes(text, result)
+    return _keep_full_place(text, result, pending_question)
 
 
 def main() -> None:

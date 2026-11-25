@@ -264,15 +264,20 @@ class SemanticMemory:
     def _query_text(self, query: str) -> str:
         """Phrase the question like the stored fact, when it is about one.
 
-        "Where do I sit?" becomes "office: where do I sit", which is the
-        shape the location vector was built from. A question about a laptop
-        is phrased the same way. Anything else is left unchanged, so a
-        password question does not get pulled toward an office fact.
+        "Where do I sit?", "where is my location", and "where am I located"
+        become "office: ...", which is the shape the location vector was
+        built from. "Which laptop do I use?", "Whats my asset Id ?", and
+        "what device do I have" become "laptop: ...", the shape the asset
+        vector was built from. Anything else is left unchanged, so a
+        password question does not get pulled toward a stored fact.
         """
         lowered = query.lower()
-        if re.search(r"\b(sit|seat|desk|office|work)\b", lowered):
+        if re.search(
+            r"\b(sit|seat|desk|office|work|location|located|based|workplace)\b",
+            lowered,
+        ):
             return f"office: {query}"
-        if re.search(r"\b(laptop|asset|machine|computer)\b", lowered):
+        if re.search(r"\b(laptops?|assets?|machines?|computers?|devices?)\b", lowered):
             return f"laptop: {query}"
         return query
 

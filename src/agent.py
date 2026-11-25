@@ -69,6 +69,8 @@ REPLIES = {
     # Used instead of out_of_scope when the message is nothing but a hello,
     # so "Hi" is answered with "Hi" and a payroll question is not.
     "greeting": "Hi. I can only help with IT issues. What can I help you with?",
+    # "ok" after a visit was written. Not a new booking, and not a refusal.
+    "ack": "You're welcome. Let me know if you need anything else.",
     "confirm": "There is nothing waiting to book.",
     "fix_issue": "That is already raised.",
     # Said when the user asks about themselves and nothing stored matches.
@@ -145,11 +147,40 @@ _GREETING = re.compile(
     r"(?:\s+there)?\s*[!.?]*\s*$",
     re.IGNORECASE,
 )
+_ACK = re.compile(
+    r"^\s*(?:ok|okay|thanks|thank you|thx|cheers|got it|alright|cool)\s*[!.?]*\s*$",
+    re.IGNORECASE,
+)
 
 
 def is_greeting(text: str) -> bool:
     """True when the message is only a hello, with no request after it."""
     return _GREETING.match(text or "") is not None
+
+
+def is_ack(text: str) -> bool:
+    """True when the message is only thanks or "ok", with no request after it."""
+    return _ACK.match(text or "") is not None
+
+
+def _booking_confirmation(said: str, result: dict, updated: bool) -> str:
+    """Replace a reply that asks to confirm a visit already written.
+
+    The model is told the row exists and still sometimes ends with
+    "Shall I book that visit?". A reply with no question is kept, even when
+    it shortens the place: the tool text already named the full location.
+    """
+    if not isinstance(result, dict):
+        return said
+    lowered = (said or "").lower()
+    asks_again = "?" in (said or "") or "shall i book" in lowered
+    if said and not asks_again:
+        return said
+    place = result.get("location") or ""
+    day = result.get("date") or ""
+    clock = result.get("time") or ""
+    verb = "Updated" if updated else "Booked"
+    return f"{verb} the visit at {place} on {day} at {clock}."
 
 
 _LAST_BOOKING = re.compile(
@@ -225,6 +256,9 @@ class Session:
         # The visit a "change the timing" turn is editing. None means the
         # next confirm inserts a new row rather than changing one.
         self.reschedule_slot_id: int | None = None
+        # Set when a visit row was written this session. A later "ok" is
+        # thanks for that, not a request to book something else.
+        self.last_booked: dict | None = None
         self.history: list[dict] = []
         # None uses the shared helpdesk database. Tests pass their own file.
         self.db_path = db_path
@@ -514,7 +548,7 @@ class Session:
                         db_path=self._db_path(),
                     )
                     tool_name = "book_it_slot"
-                self.note_booked()
+                self.note_booked(booked if isinstance(booked, dict) else None)
                 self.memory.remember_event(
                     (
                         f"Booked a visit at {booked['location']} on {booked['date']} "
@@ -710,7 +744,9 @@ class Session:
             verb = "Updated" if name == "update_slot" else "Booked"
             shown = (
                 f"{verb} slot {result['slot_id']} at {result['location']} "
-                f"on {result['date']} at {result['time']}, status {result['status']}."
+                f"on {result['date']} at {result['time']}, status {result['status']}. "
+                "This visit is already written. Tell the user it is booked. "
+                "Do not ask a question."
             )
         else:
             raise ValueError(f"unknown tool: {name!r}")
@@ -734,6 +770,10 @@ class Session:
             # The visit is written. Drop the day and time so the next visit
             # cannot reuse them, after the reply has used them.
             self.note_booked()
+            # The model is told not to ask again, and still sometimes repeats
+            # "Shall I book that visit?". The booking is already done, so
+            # that sentence is replaced by the row that was written.
+            said = _booking_confirmation(said, result, updated=name == "update_slot")
         self._log_exchange(text, said)
         return said
 
@@ -750,6 +790,11 @@ class Session:
         # Only the hello gets the greeting line, so the refusal stays a refusal.
         if intent == "out_of_scope" and is_greeting(text):
             intent = "greeting"
+        # "ok" after a written visit is thanks. The same word with nothing
+        # booked stays a short acknowledgement, not a refusal and not
+        # "there is nothing waiting to book".
+        if is_ack(text) and intent in ("out_of_scope", "confirm"):
+            intent = "ack"
         required = REPLIES.get(intent, REPLIES["out_of_scope"])
         prompt = (
             f"User message: {text}\n\n"
@@ -827,17 +872,25 @@ class Session:
             f"status {result['status']}."
         )
 
-    def note_booked(self) -> None:
+    def note_booked(self, booked: dict | None = None) -> None:
         """Call after a confirmed booking has been written.
 
         The place and the fault stay, because a follow-up such as "and for
         Friday?" still refers to them. The day and the time do not, so the
         next booking cannot reuse a slot the user did not ask for.
+        The written row is kept so a later "ok" can be answered as thanks
+        rather than as a second confirmation.
         """
         self.pending_booking = False
         self.awaiting_confirmation = False
         self.pending_ticket = False
         self.reschedule_slot_id = None
+        if isinstance(booked, dict):
+            self.last_booked = {
+                "location": booked.get("location"),
+                "date": booked.get("date"),
+                "time": booked.get("time"),
+            }
         self.slots["date"] = None
         self.slots["time"] = None
 

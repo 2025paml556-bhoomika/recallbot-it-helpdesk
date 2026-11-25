@@ -68,10 +68,29 @@ def test_moving_office_supersedes_the_old_one(tmp_path):
         turn=2,
     )
     assert [row["value"] for row in written] == ["Hyderabad"]
-    active = memory.semantic.active("U1")
-    assert len(active) == 1
-    assert active[0]["value"] == "Hyderabad"
-    assert active[0]["status"] == "active"
+
+
+def test_a_visit_does_not_store_its_place_as_where_the_user_sits(tmp_path):
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    written = memory.record_turn(
+        "Can you come to my desk?",
+        "book_slot",
+        {"location": "desk 14"},
+        turn=4,
+    )
+    assert written == []
+    assert memory.semantic.active("U1") == []
+
+    # Saying where they sit is still a standing fact.
+    memory.record_turn(
+        "I sit at the Pune office.",
+        "provide_info",
+        {"location": "Pune office"},
+        turn=5,
+    )
+    assert [row["value"] for row in memory.semantic.active("U1")] == ["Pune office"]
 
 
 def test_an_update_leaves_one_active_and_one_superseded(tmp_path):
@@ -315,3 +334,34 @@ def test_clear_user_removes_only_that_users_memory(tmp_path):
     assert second.semantic.active("U2")[0]["value"] == "Hyderabad"
     assert second.episodic.for_user("U2")[0]["text"] == "Raised TCK-0002 for Wi-Fi."
     assert (tmp_path / "sessions" / "U2__S-1.json").exists()
+
+
+def test_location_wording_is_searched_as_an_office(tmp_path):
+    store = SemanticMemory(tmp_path)
+    store.remember("U1", "location", "Hyderabad office", turn=1)
+    for question in (
+        "where is my location",
+        "Where do I sit?",
+        "what is my office",
+        "where am I based",
+        "Where am I located",
+    ):
+        hits = store.recall("U1", question)
+        assert hits, question
+        assert hits[0]["key"] == "location"
+        assert hits[0]["value"] == "Hyderabad office"
+
+
+def test_asset_wording_is_searched_as_a_laptop(tmp_path):
+    store = SemanticMemory(tmp_path)
+    store.remember("U1", "asset_id", "LAP-T14G3", turn=1)
+    for question in (
+        "which laptop do I use",
+        "Whats my asset Id ?",
+        "what is my asset",
+        "what device do I have",
+    ):
+        hits = store.recall("U1", question)
+        assert hits, question
+        assert hits[0]["key"] == "asset_id"
+        assert hits[0]["value"] == "LAP-T14G3"
