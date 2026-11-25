@@ -1,0 +1,56 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug current test file",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "python": "${command:python.interpreterPath}",
+            "args": [
+                "${file}",
+                "-v",
+                "--tb=short",
+                "-s"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Debug specific test",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "python": "${command:python.interpreterPath}",
+            "args": [
+                "${file}::${selectedText}",
+                "-v",
+                "--tb=short",
+                "-s"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Debug current Python file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "python": "${command:python.interpreterPath}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}
