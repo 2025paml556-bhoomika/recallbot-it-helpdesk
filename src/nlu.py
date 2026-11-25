@@ -368,6 +368,7 @@ def understand(
     trace: list | None = None,
     pending_question: str | None = None,
     run_id: str | None = None,
+    config: str | None = None,
 ) -> dict:
     """Label one user sentence.
 
@@ -392,6 +393,7 @@ def understand(
         system=SYSTEM_PROMPT,
         temperature=0.0,
         call_type="nlu",
+        config=config,
         user=user,
         session=session,
         turn=turn,

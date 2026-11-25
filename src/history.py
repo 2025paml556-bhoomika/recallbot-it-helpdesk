@@ -126,11 +126,12 @@ class WorkingMemory:
         turn: int | None = None,
         trace: list | None = None,
         run_id: str | None = None,
+        config: str | None = None,
     ) -> str:
         """Rewrite the summary to include the turns since the last one.
 
         Returns the new summary. One chat call, logged as call_type
-        "summarise". With no turns, nothing is written and no call is made.
+        "summary". With no turns, nothing is written and no call is made.
         """
         if not history:
             return self.summary
@@ -142,7 +143,8 @@ class WorkingMemory:
             prompt,
             system=SUMMARY_SYSTEM,
             temperature=0.0,
-            call_type="summarise",
+            call_type="summary",
+            config=config,
             user=self.user,
             session=self.session,
             turn=turn,

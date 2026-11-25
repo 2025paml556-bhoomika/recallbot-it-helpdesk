@@ -244,7 +244,7 @@ def test_asking_where_i_sit_does_not_write_a_fact(tmp_path):
 
 def test_ending_a_session_deletes_the_working_summary(monkeypatch, tmp_path):
     def fake_chat(prompt, **kwargs):
-        assert kwargs["call_type"] == "summarise"
+        assert kwargs["call_type"] == "summary"
         return "U1 has a VPN fault and wants a Thursday visit."
 
     monkeypatch.setattr("src.history.chat", fake_chat)

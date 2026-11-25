@@ -72,10 +72,20 @@ python -m src.eval_retrieval
 ```
 
 That writes `results/hit_rate.csv` (3 methods × 2 chunk sizes, plus code and reworded rows) and `results/hybrid_cases.json` (one question hybrid fixed, one it did not, with all three rankings).
+
+Flat against HNSW, for the one-year index size (Task 5(b)):
+
+```bash
+python -m src.bench_index
+```
+
+Prints the vector count after one year (knowledge-base chunks plus 100,000 users' facts and episodes, taken from `data/test_conversation.json`), the bytes for a flat float32 index and for HNSW with M=16 using the FAISS per-vector formula, query latency of both on 100,000 vectors, and HNSW recall against flat on `data/kb_questions.json`. The same numbers are written to `results/bench_index.csv`. `--n` raises the vector count and `--queries` the number of timed queries. The run embeds the chunks, so the first call downloads `all-MiniLM-L6-v2` if it is not cached.
 | `memory/` | Semantic and episodic stores (Steps 7–8) |
 | `logs/calls.jsonl` | Append-only call log. Never edit lines |
 | `results/plots/` | Token and evaluation plots |
 
 ## Logging
 
-`src.logger.log_call()` only appends. Each successful LLM call adds one JSON line with `ts`, `run_id`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens` and `latency_ms`. Token counts are the API's `prompt_eval_count` and `eval_count`. A failed call writes nothing.
+`src.logger.log_call()` only appends. Each successful LLM call adds one JSON line with `ts`, `run_id`, `config`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens` and `latency_ms`. Token counts are the API's `prompt_eval_count` and `eval_count`. A failed call writes nothing.
+
+A new line uses `call_type` `chat`, `nlu`, `embed`, `tool`, `summary`, `extract`, `importance`, `reflect` or `judge`. The older names `reply`, `summarise` and `embedding` are no longer written. Lines already in the file keep the name they were written with, and are not edited. `config` on a new line is one of `full`, `trim`, `summary`, `no_rag`, `hybrid`, `hybrid_sem`, `hybrid_mem`. A line from before this field was filled in has `config` null.

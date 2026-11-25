@@ -37,9 +37,11 @@ def _log_tool(
     name: str,
     start: float,
     *,
+    config: str | None = None,
     user: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
     payload = {"tool": name}
@@ -51,9 +53,11 @@ def _log_tool(
         input_tokens=TOOL_INPUT_TOKENS,
         output_tokens=TOOL_OUTPUT_TOKENS,
         start=start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra=payload,
     )
 
@@ -64,9 +68,11 @@ def search_kb(
     mode: str = "hybrid",
     top_k: int = 5,
     size: int = 128,
+    config: str | None = None,
     user: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
 ) -> list[dict]:
     """Top chunks for a query. The knowledge base is shared across users.
 
@@ -78,9 +84,11 @@ def search_kb(
     _log_tool(
         "search_kb",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"query": query, "mode": mode, "size": size, "n_hits": len(hits)},
     )
     return hits
@@ -90,8 +98,10 @@ def get_ticket(
     ticket_id: str,
     user: str,
     *,
+    config: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     db_path=DB_PATH,
 ) -> dict | str:
     """The ticket if it belongs to `user`, otherwise "not found".
@@ -116,9 +126,11 @@ def get_ticket(
     _log_tool(
         "get_ticket",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"ticket_id": ticket_id},
     )
     return ticket
@@ -127,8 +139,10 @@ def get_ticket(
 def latest_ticket(
     user: str,
     *,
+    config: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     db_path=DB_PATH,
 ) -> dict | str:
     """This user's newest ticket, or "not found" when they have none.
@@ -159,9 +173,11 @@ def latest_ticket(
     _log_tool(
         "get_ticket",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"ticket_id": ticket["ticket_id"], "latest": True},
     )
     return ticket
@@ -170,8 +186,10 @@ def latest_ticket(
 def latest_booking(
     user: str,
     *,
+    config: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     db_path=DB_PATH,
 ) -> dict | str:
     """This user's newest booked visit, or "not found" when they have none.
@@ -201,9 +219,11 @@ def latest_booking(
     _log_tool(
         "get_booking",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"slot_id": booked["slot_id"], "latest": True},
     )
     return booked
@@ -219,8 +239,10 @@ def book_it_slot(
     confirmed: bool = False,
     ticket_id: str | None = None,
     asset_id: str | None = None,
+    config: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     db_path=DB_PATH,
 ) -> dict | None:
     """Insert one slots row, but only after the user has confirmed.
@@ -268,9 +290,11 @@ def book_it_slot(
     _log_tool(
         "book_it_slot",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"slot_id": booked["slot_id"], "confirmed": True},
     )
     return booked
@@ -283,8 +307,10 @@ def update_slot(
     location: str | None = None,
     date: str | None = None,
     time_of_day: str | None = None,
+    config: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     db_path=DB_PATH,
 ) -> dict | str:
     """Change one of this user's visits. A missing or other-owned row is "not found".
@@ -326,9 +352,11 @@ def update_slot(
     _log_tool(
         "update_slot",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"slot_id": slot_id, "confirmed": True},
     )
     return updated
@@ -340,8 +368,10 @@ def raise_ticket(
     *,
     ticket_id: str | None = None,
     asset_id: str | None = None,
+    config: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     db_path=DB_PATH,
 ) -> dict:
     """Insert one ticket owned by `user`. Used by tests and the dialogue loop.
@@ -376,9 +406,11 @@ def raise_ticket(
     _log_tool(
         "raise_ticket",
         start,
+        config=config,
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"ticket_id": ticket["ticket_id"]},
     )
     return ticket

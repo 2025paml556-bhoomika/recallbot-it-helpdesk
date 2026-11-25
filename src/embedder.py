@@ -75,7 +75,7 @@ def embed(
     if not log:
         return vectors
     log_call(
-        call_type="embedding",
+        call_type="embed",
         model=EMBED_MODEL,
         input_tokens=input_tokens,
         output_tokens=0,

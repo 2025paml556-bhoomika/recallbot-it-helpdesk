@@ -25,6 +25,37 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 # Change this string at the start of every run. Do not edit past log lines.
 RUN_ID = os.environ.get("RECALLBOT_RUN_ID", "r01")
 
+# What call_type a new log line may use. Old lines in logs/calls.jsonl use
+# "reply", "summarise" and "embedding"; those names are not written any more,
+# and the old lines are not rewritten. extract, importance, reflect and judge
+# are the steps that do not exist yet. Listing them here means a later step
+# can log one without inventing a new name.
+CALL_TYPES = (
+    "chat",
+    "nlu",
+    "embed",
+    "tool",
+    "summary",
+    "extract",
+    "importance",
+    "reflect",
+    "judge",
+)
+
+# The configuration a run is measuring. Short-term memory is full, trim or
+# summary. The ablation runs are no_rag, hybrid, hybrid_sem and hybrid_mem.
+# A new log line carries one of these. A line written before this field was
+# filled in has config null, and is left that way.
+CONFIGS = (
+    "full",
+    "trim",
+    "summary",
+    "no_rag",
+    "hybrid",
+    "hybrid_sem",
+    "hybrid_mem",
+)
+
 # Embeddings. all-MiniLM-L6-v2 mean-pools to 384 dimensions; embedder.py
 # L2-normalises each vector so cosine similarity is a dot product.
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"

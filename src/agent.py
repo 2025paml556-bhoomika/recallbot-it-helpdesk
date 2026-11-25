@@ -328,6 +328,7 @@ class Session:
             trace=self.calls,
             pending_question=self._pending_question(),
             run_id=self.run_id,
+            config=self.strategy,
         )
         self._merge(understood["intent"], understood["slots"])
         snapshot = {
@@ -401,8 +402,10 @@ class Session:
             return
         found = latest_booking(
             self.user,
+            config=self.strategy,
             session=self.session,
             turn=self.turn,
+            run_id=self.run_id,
             db_path=self._db_path(),
         )
         if not isinstance(found, dict):
@@ -512,7 +515,14 @@ class Session:
                 return self._advance_booking()
             return self._tool(
                 "search_kb",
-                search_kb(text, user=self.user, session=self.session, turn=self.turn),
+                search_kb(
+                    text,
+                    config=self.strategy,
+                    user=self.user,
+                    session=self.session,
+                    turn=self.turn,
+                    run_id=self.run_id,
+                ),
                 {"query": text},
             )
 
@@ -581,8 +591,10 @@ class Session:
                         location=self.slots["location"],
                         date=self.slots["date"],
                         time_of_day=self.slots["time"],
+                        config=self.strategy,
                         session=self.session,
                         turn=self.turn,
+                        run_id=self.run_id,
                         db_path=self._db_path(),
                     )
                     tool_name = "update_slot"
@@ -596,8 +608,10 @@ class Session:
                         confirmed=True,
                         ticket_id=self.slots.get("ticket_id"),
                         asset_id=self.slots.get("asset_id"),
+                        config=self.strategy,
                         session=self.session,
                         turn=self.turn,
+                        run_id=self.run_id,
                         db_path=self._db_path(),
                     )
                     tool_name = "book_it_slot"
@@ -643,8 +657,10 @@ class Session:
         if _LAST_BOOKING.search(text):
             found = latest_booking(
                 self.user,
+                config=self.strategy,
                 session=self.session,
                 turn=self.turn,
+                run_id=self.run_id,
                 db_path=self._db_path(),
             )
             return self._tool("get_booking", found, {"user": self.user, "latest": True})
@@ -653,8 +669,10 @@ class Session:
         if not ticket_id and _LAST_TICKET.search(text):
             found = latest_ticket(
                 self.user,
+                config=self.strategy,
                 session=self.session,
                 turn=self.turn,
+                run_id=self.run_id,
                 db_path=self._db_path(),
             )
             ticket_id = found["ticket_id"] if isinstance(found, dict) else None
@@ -668,8 +686,10 @@ class Session:
         found = get_ticket(
             ticket_id,
             self.user,
+            config=self.strategy,
             session=self.session,
             turn=self.turn,
+            run_id=self.run_id,
             db_path=self._db_path(),
         )
         return self._tool("get_ticket", found, {"ticket_id": ticket_id, "user": self.user})
@@ -715,8 +735,10 @@ class Session:
             self.user,
             issue,
             asset_id=self.slots.get("asset_id"),
+            config=self.strategy,
             session=self.session,
             turn=self.turn,
+            run_id=self.run_id,
             db_path=self._db_path(),
         )
         self.slots["ticket_id"] = ticket["ticket_id"]
@@ -846,7 +868,8 @@ class Session:
             prompt,
             system=reply_system(booking=booking),
             temperature=TASK_TEMPERATURE,
-            call_type="reply",
+            call_type="chat",
+            config=self.strategy,
             user=self.user,
             session=self.session,
             turn=self.turn,
@@ -908,7 +931,8 @@ class Session:
             system=reply_system(booking=False),
             temperature=OPEN_TEMPERATURE,
             top_p=OPEN_TOP_P,
-            call_type="reply",
+            call_type="chat",
+            config=self.strategy,
             user=self.user,
             session=self.session,
             turn=self.turn,
@@ -936,7 +960,11 @@ class Session:
             fresh = pending[self.memory.working.covered :]
             if fresh:
                 self.memory.working.update(
-                    fresh, turn=self.turn, trace=self.calls, run_id=self.run_id
+                    fresh,
+                    turn=self.turn,
+                    trace=self.calls,
+                    run_id=self.run_id,
+                    config=self.strategy,
                 )
         return window_text(self.history, self.strategy, self.memory.working.summary)
 

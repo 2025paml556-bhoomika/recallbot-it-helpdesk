@@ -12,7 +12,7 @@ import json
 import time
 from typing import Any
 
-from src.config import LOG_PATH, RUN_ID
+from src.config import CALL_TYPES, CONFIGS, LOG_PATH, RUN_ID
 
 # Fields the brief's sample line and TESTING.md T1.5 both require.
 REQUIRED_FIELDS = (
@@ -50,7 +50,18 @@ def log_call(
     `start` is time.time() taken just before the call. Token counts must
     come from the API usage field when the backend reports them.
     Returns the record that was written.
+
+    call_type must be one of CALL_TYPES. The names the old log lines use
+    ("reply", "summarise", "embedding") are refused, so a new line cannot
+    be written in the old vocabulary. config, when given, must be one of
+    CONFIGS. Passing None is still allowed: a call made outside a measured
+    run (a smoke test, a one-off search) has no configuration to name.
     """
+    if call_type not in CALL_TYPES:
+        raise ValueError(f"call_type must be one of {CALL_TYPES}, got {call_type!r}")
+    if config is not None and config not in CONFIGS:
+        raise ValueError(f"config must be one of {CONFIGS}, got {config!r}")
+
     record: dict[str, Any] = {
         "ts": datetime.datetime.now().astimezone().isoformat(timespec="milliseconds"),
         "run_id": run_id if run_id is not None else RUN_ID,

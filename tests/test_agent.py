@@ -856,7 +856,7 @@ def test_a_tool_result_is_phrased_by_one_model_call(monkeypatch, tmp_path):
 
     assert said == "I've raised TCK-0001 for the VPN failure."
     assert seen["temperature"] == 0.0
-    assert seen["call_type"] == "reply"
+    assert seen["call_type"] == "chat"
     assert seen["user"] == "U1"
     assert seen["session"] == "A"
     assert seen["turn"] == 2
@@ -994,7 +994,7 @@ def test_an_open_turn_is_reworded_and_reads_the_skill_file(monkeypatch, tmp_path
     for call in seen:
         assert call["temperature"] == 0.7
         assert call["top_p"] == 0.9
-        assert call["call_type"] == "reply"
+        assert call["call_type"] == "chat"
         # The persona was read from skills/system_prompt_v1.md, not inlined.
         assert "corporate IT helpdesk" in call["system"]
         # An open turn is not a booking, so the slot steps stay out.
@@ -1356,7 +1356,7 @@ def test_a_reply_is_appended_to_that_sessions_json_file(monkeypatch, tmp_path):
     assert saved["turns"][0]["bot"] == said
     assert saved["turns"][0]["intent"] == "out_of_scope"
     # An open turn is one reply call, logged beside the sentence.
-    assert saved["turns"][0]["calls"][0]["call_type"] == "reply"
+    assert saved["turns"][0]["calls"][0]["call_type"] == "chat"
 
     other = Session("U1", "S-2", memory=Memory("U1", "S-2", root=tmp_path))
     other.ingest(text)
@@ -1386,7 +1386,7 @@ def test_a_tool_turn_logs_the_prompts_and_the_tool_call(monkeypatch, tmp_path):
             "ERR-VPN-809 means the tunnel dropped, from vpn.md.",
             system=kwargs.get("system"),
             user=prompt,
-            call_type=kwargs.get("call_type", "reply"),
+            call_type=kwargs.get("call_type", "chat"),
             model="stub",
         )
         trace = kwargs.get("trace")

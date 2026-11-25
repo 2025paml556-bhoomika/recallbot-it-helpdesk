@@ -27,7 +27,7 @@ class ChatResult(str):
 
     It is a str, so `reply.strip()` and f-strings keep working. system is
     the system prompt (None when the call sent none), user is the user
-    prompt, and call_type says which step this was (nlu, reply, summarise).
+    prompt, and call_type says which step this was (nlu, chat, summary).
     """
 
     def __new__(

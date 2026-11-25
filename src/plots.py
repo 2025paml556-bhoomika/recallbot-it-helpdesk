@@ -1,8 +1,13 @@
 """Input tokens per turn for the three short-term memory strategies.
 
-Reads logs/calls.jsonl. One line per strategy, reply calls only, so the
+Reads logs/calls.jsonl. One line per strategy, chat calls only, so the
 shape of the prompt is what the chart shows. The printed totals add the
-summarise calls too, because those tokens were spent to keep the notes.
+summary calls too, because those tokens were spent to keep the notes.
+
+Lines written before the vocabulary change are labelled "reply" and
+"summarise". Those names are read as "chat" and "summary", so a log that
+holds both the old runs and a new one still plots. The file itself is not
+rewritten.
 
     python -m src.plots
 """
@@ -10,8 +15,6 @@ summarise calls too, because those tokens were spent to keep the notes.
 from __future__ import annotations
 
 import json
-from collections import defaultdict
-
 from src.config import LOG_PATH, ROOT
 
 PLOT_PATH = ROOT / "results" / "plots" / "history_tokens.png"
@@ -42,11 +45,22 @@ def strategy_of(run_id: str) -> str | None:
     return name if name in STRATEGIES else None
 
 
+# Names the log used before the vocabulary was fixed. Read as the new name.
+# The lines stay as they were written.
+_OLD_CALL_TYPES = {"reply": "chat", "summarise": "summary", "embedding": "embed"}
+
+
+def canonical_call_type(row: dict) -> str:
+    """The call type, with the retired names mapped onto the current ones."""
+    kind = row.get("call_type")
+    return _OLD_CALL_TYPES.get(kind, kind)
+
+
 def reply_series(calls: list[dict]) -> dict[str, list[tuple[int, int]]]:
-    """(turn, input tokens) for each strategy's reply calls, in turn order."""
+    """(turn, input tokens) for each strategy's chat calls, in turn order."""
     series: dict[str, list[tuple[int, int]]] = {name: [] for name in STRATEGIES}
     for row in calls:
-        if row.get("call_type") != "reply":
+        if canonical_call_type(row) != "chat":
             continue
         name = strategy_of(row.get("run_id", ""))
         if name is None or row.get("turn") is None:
@@ -58,18 +72,19 @@ def reply_series(calls: list[dict]) -> dict[str, list[tuple[int, int]]]:
 
 
 def totals(calls: list[dict]) -> dict[str, dict[str, int]]:
-    """Input tokens per strategy, split into reply calls and summarise calls.
+    """Input tokens per strategy, split into chat calls and summary calls.
 
     nlu calls are not part of the short-term memory cost, so they are left
-    out. A tool call logs 0 tokens and does not change the total.
+    out. A tool call logs 0 tokens and does not change the total. A line
+    logged as "reply" or "summarise" is counted under the name it maps to.
     """
     counted: dict[str, dict[str, int]] = {
-        name: {"reply": 0, "summarise": 0} for name in STRATEGIES
+        name: {"chat": 0, "summary": 0} for name in STRATEGIES
     }
     for row in calls:
         name = strategy_of(row.get("run_id", ""))
-        kind = row.get("call_type")
-        if name is None or kind not in ("reply", "summarise"):
+        kind = canonical_call_type(row)
+        if name is None or kind not in ("chat", "summary"):
             continue
         counted[name][kind] += int(row.get("input_tokens") or 0)
     return counted
@@ -92,7 +107,7 @@ def plot(calls: list[dict], path=PLOT_PATH) -> dict:
         tokens = [tokens for _turn, tokens in points]
         ax.plot(turns, tokens, marker="o", label=name)
     ax.set_xlabel("Turn")
-    ax.set_ylabel("Input tokens (reply calls)")
+    ax.set_ylabel("Input tokens (chat calls)")
     ax.set_title("Short-term memory: input tokens per turn")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -107,9 +122,9 @@ def main() -> None:
     calls = load_calls()
     counted = plot(calls)
     for name in STRATEGIES:
-        reply = counted[name]["reply"]
-        summary = counted[name]["summarise"]
-        print(f"{name}: reply {reply} + summarise {summary} = {reply + summary}")
+        reply = counted[name]["chat"]
+        summary = counted[name]["summary"]
+        print(f"{name}: chat {reply} + summary {summary} = {reply + summary}")
     print(f"wrote {PLOT_PATH}")
 
 
