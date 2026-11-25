@@ -400,6 +400,114 @@ def test_a_colour_and_a_name_are_stored_as_notes(tmp_path):
     assert len([row for row in memory.semantic.active("U1") if row["key"] == "note"]) == 2
 
 
+def test_the_nine_profile_keys_are_extracted_from_the_scripted_turns(tmp_path):
+    """Turns 1 to 7 state the profile. Each lands under its own key.
+
+    The NLU slots are empty here, which is what the model returns for these
+    sentences. The facts still have to be stored, because they are read off
+    the sentence rather than off a slot.
+    """
+    import json
+
+    from src.config import ROOT
+    from src.memory import Memory
+    from src.semantic_memory import PROFILE_KEYS
+
+    turns = json.loads((ROOT / "data" / "test_conversation.json").read_text())["turns"]
+    memory = Memory("U1", "A", root=tmp_path)
+    for turn in turns:
+        if turn["session"] != "A" or turn["turn"] > 7:
+            continue
+        memory.record_turn(turn["text"], "provide_info", {}, turn["turn"])
+
+    active = memory.semantic.active("U1")
+    stored = {row["key"]: row["value"] for row in active}
+    expected = {}
+    for turn in turns:
+        if turn["session"] == "A" and turn["turn"] <= 7:
+            for fact in turn.get("facts", []):
+                expected[fact["key"]] = fact["value"]
+    assert set(expected) == set(PROFILE_KEYS)
+    assert stored == expected
+    # A profile sentence is the fact, not also a free-text note.
+    assert "note" not in stored
+
+
+def test_a_profile_update_supersedes_the_old_value(tmp_path):
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    memory.record_turn(
+        "I work in the finance department, and my manager is Rohan Deshpande.",
+        "provide_info",
+        {},
+        turn=4,
+    )
+    written = memory.record_turn(
+        "And my manager changed too. It's Priya Nair now, not Rohan Deshpande.",
+        "provide_info",
+        {},
+        turn=21,
+    )
+    assert [row["value"] for row in written] == ["Priya Nair"]
+    managers = [row for row in memory.semantic.active("U1") if row["key"] == "manager"]
+    assert [row["value"] for row in managers] == ["Priya Nair"]
+    rows = [row for row in memory.semantic._read() if row["key"] == "manager"]
+    assert [(row["value"], row["status"]) for row in rows] == [
+        ("Rohan Deshpande", "superseded"),
+        ("Priya Nair", "active"),
+    ]
+
+
+def test_a_move_replaces_the_office_and_keeps_the_floor(tmp_path):
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    memory.record_turn(
+        "I sit at the Pune office, on the third floor.",
+        "provide_info",
+        {},
+        turn=3,
+    )
+    memory.record_turn(
+        "One more thing: I've moved. I'm at the Hyderabad office now, not Pune.",
+        "provide_info",
+        {},
+        turn=20,
+    )
+    active = {row["key"]: row["value"] for row in memory.semantic.active("U1")}
+    assert active["office"] == "Hyderabad"
+    assert active["floor"] == "3rd floor"
+
+
+def test_who_is_my_manager_recalls_the_manager_and_not_the_office(tmp_path):
+    store = SemanticMemory(tmp_path)
+    store.remember("U1", "office", "Hyderabad", turn=20)
+    store.remember("U1", "manager", "Priya Nair", turn=21)
+    store.remember("U1", "department", "finance", turn=4)
+    hits = store.recall("U1", "Who is my manager now?")
+    assert hits
+    assert hits[0]["key"] == "manager"
+    assert hits[0]["value"] == "Priya Nair"
+
+
+def test_a_booking_sentence_does_not_overwrite_the_profile_office(tmp_path):
+    """"The Pune office." while booking a visit is not where the user sits."""
+    from src.memory import Memory
+
+    memory = Memory("U1", "A", root=tmp_path)
+    memory.record_turn(
+        "I sit at the Pune office, on the third floor.",
+        "provide_info",
+        {},
+        turn=3,
+    )
+    written = memory.record_turn("The Pune office.", "book_slot", {"location": "Pune office"}, turn=12)
+    assert written == []
+    active = {row["key"]: row["value"] for row in memory.semantic.active("U1")}
+    assert active == {"office": "Pune", "floor": "3rd floor"}
+
+
 def test_a_fault_and_a_visit_are_not_stored_as_notes(tmp_path):
     from src.memory import Memory
 

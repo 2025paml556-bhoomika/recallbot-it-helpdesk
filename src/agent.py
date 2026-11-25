@@ -85,7 +85,16 @@ REPLIES = {
 # one line. A key with no entry is read as "Your <key> is <value>."
 FACT_REPLIES = {
     "location": "You sit at {value}.",
+    "office": "You sit at the {value} office.",
     "asset_id": "You use {value}.",
+    "laptop_model": "Your laptop is a {value}.",
+    "os": "Your laptop runs {value}.",
+    "floor": "You are on the {value}.",
+    "department": "You work in {value}.",
+    "manager": "Your manager is {value}.",
+    "contact_time": "The best time to call you is {value}.",
+    "vpn_client": "You connect with {value}.",
+    "personal_phone": "Your personal number is {value}.",
     # A name, a colour, or a badge was stored as the sentence itself.
     "note": "You told me: {value}",
 }

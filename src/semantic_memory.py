@@ -34,23 +34,94 @@ from src.config import (
 )
 from src.embedder import embed
 
-# Slots that name a standing fact. A booking day is not one of them.
-# A personal line that fits neither slot (a name, a colour, a badge) is
-# stored as its own note instead, so it does not have to borrow a slot.
+# Standing facts. location and asset_id come from the NLU slots. The nine
+# profile keys come from the sentence, because the NLU schema has no slot
+# for an operating system, a floor, or a phone number. A line that matches
+# none of them (a name, a colour, a badge) is stored as its own note.
 FACT_KEYS = ("location", "asset_id")
+PROFILE_KEYS = (
+    "os",
+    "laptop_model",
+    "office",
+    "floor",
+    "department",
+    "manager",
+    "contact_time",
+    "vpn_client",
+    "personal_phone",
+)
 NOTE_KEY = "note"
 
 # One note per sentence. "My badge number is 4412" must not replace
-# "My laptop bag is blue", and neither must replace the laptop id.
-# location and asset_id stay one active value each: a new office replaces
-# the old office.
-_SINGLE_VALUE_KEYS = FACT_KEYS
+# "My laptop bag is blue". Every keyed fact has one active value: a new
+# office replaces the old office, and a new manager replaces the old one.
+_SINGLE_VALUE_KEYS = FACT_KEYS + PROFILE_KEYS
 
-# How a slot is phrased when it is embedded and when it is read back.
+# How a fact is phrased when it is embedded and when it is read back.
 FACT_LABELS = {
     "location": "office",
     "asset_id": "laptop",
     "note": "note",
+    "os": "operating system",
+    "laptop_model": "laptop model",
+    "office": "office",
+    "floor": "floor",
+    "department": "department",
+    "manager": "manager",
+    "contact_time": "best time to call",
+    "vpn_client": "vpn client",
+    "personal_phone": "personal phone",
+}
+
+# Each pattern takes one value out of a profile sentence. The conversation
+# states these in a few fixed ways, so a regex is enough and no model call
+# is spent. A sentence that matches none of them is not a profile fact.
+_PROFILE_PATTERNS: dict[str, re.Pattern[str]] = {
+    "os": re.compile(r"\b((?:Windows|macOS|Linux)\s*\d*)\b", re.IGNORECASE),
+    # "My laptop is LAP-T14G3." fills the asset_id slot, so it is not also a
+    # model. The model sentences say "it's a LAP-..." or "I have a LAP-...".
+    "laptop_model": re.compile(
+        r"\bit'?s\s+a\s+(LAP-[A-Z0-9]+)\b|\bI\s+(?:use|have)\s+a\s+(LAP-[A-Z0-9]+)\b",
+        re.IGNORECASE,
+    ),
+    "office": re.compile(
+        # "I sit at the Pune office, on the third floor." The city is the
+        # office and the floor is a separate key. "I sit at the Pune office."
+        # with nothing after it is the location slot, not this key, so the
+        # sentence has to go on and name the floor.
+        r"\b(?:sit at|based at|work from)\s+the\s+([A-Z][A-Za-z]+)\s+office\s*,\s*on\b"
+        r"|\b(?:moved|at)\s+the\s+([A-Z][A-Za-z]+)\s+office\s+now\b"
+        r"|\bwork from\s+the\s+([A-Z][A-Za-z]+)\s+office\b",
+        re.IGNORECASE,
+    ),
+    "floor": re.compile(
+        r"\b(\d+(?:st|nd|rd|th)|first|second|third|fourth|fifth)\s+floor\b",
+        re.IGNORECASE,
+    ),
+    "department": re.compile(
+        r"\b(?:in|work in)\s+the\s+([A-Za-z]+)\s+department\b",
+        re.IGNORECASE,
+    ),
+    "manager": re.compile(
+        r"\bmanager(?:\s+changed)?\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)"
+        r"|\b(?:it'?s|now)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+now\b",
+        re.IGNORECASE,
+    ),
+    "contact_time": re.compile(
+        r"\b(?:only\s+)?call me\s+(after\s+\d{1,2}\s*(?:am|pm))\b"
+        r"|\b(before\s+\d{1,2}\s*(?:am|pm))\b",
+        re.IGNORECASE,
+    ),
+    "vpn_client": re.compile(r"\b(Cisco\s+AnyConnect)\b", re.IGNORECASE),
+    "personal_phone": re.compile(r"\b(\d{5}\s*\d{5})\b"),
+}
+
+_ORDINALS = {
+    "first": "1st",
+    "second": "2nd",
+    "third": "3rd",
+    "fourth": "4th",
+    "fifth": "5th",
 }
 
 # asset_id is a laptop id such as LAP-T14G3. A badge number is digits only,
@@ -88,9 +159,10 @@ class SemanticMemory:
         A small-talk turn writes nothing. location and asset_id are written
         from the slots. asset_id is written only when it is a laptop id
         (LAP-...), so a badge number the model parked there is not stored
-        as the laptop. Anything else the user stated on this turn is one
-        note, kept beside the slots rather than forced into one of them.
-        A new office replaces the old office. A new note does not.
+        as the laptop. The nine profile keys are read from the sentence
+        itself, so a missing NLU slot cannot drop the operating system or
+        the phone number. Anything left over is one note. A new value of a
+        keyed fact replaces the old one. A new note does not.
         """
         if self.is_small_talk(text):
             return []
@@ -105,8 +177,14 @@ class SemanticMemory:
                 continue
             written.append(self.remember(user, key, value.strip(), turn))
 
+        profile = profile_facts(text) if text.strip() else {}
+        for key in PROFILE_KEYS:
+            value = profile.get(key)
+            if value:
+                written.append(self.remember(user, key, value, turn))
+
         note = text.strip()
-        if note and not self._covered_by_slots(note, slots):
+        if note and not self._covered_by_slots(note, slots) and not profile:
             written.append(self.remember(user, NOTE_KEY, note, turn))
         return written
 
@@ -144,8 +222,8 @@ class SemanticMemory:
     def remember(self, user: str, key: str, value: str, turn: int | None) -> dict:
         """Append one active fact.
 
-        location and asset_id supersede this user's previous value, so
-        there is one office and one laptop. A note does not: each sentence
+        A keyed fact supersedes this user's previous value, so there is one
+        office, one laptop, and one manager. A note does not: each sentence
         stays active, and an identical sentence is not written twice.
         """
         if key in _SINGLE_VALUE_KEYS:
@@ -180,8 +258,8 @@ class SemanticMemory:
     def active(self, user: str) -> list[dict]:
         """This user's active facts.
 
-        location and asset_id contribute their latest line only. Every
-        active note is kept, because each one is a different sentence.
+        A keyed fact contributes its latest line only. Every active note is
+        kept, because each one is a different sentence.
         """
         found = []
         for row in self._read():
@@ -198,8 +276,8 @@ class SemanticMemory:
     def active_records(self) -> list[dict]:
         """Every user's active facts.
 
-        location and asset_id are one row per user. Notes are one row per
-        sentence, so a colour and a badge are both in the index.
+        A keyed fact is one row per user. Notes are one row per sentence,
+        so a colour and a badge are both in the index.
         """
         found = []
         for user in self._users():
@@ -267,6 +345,26 @@ class SemanticMemory:
         lowered = query.lower()
         if re.search(r"\b(colour|color|bag|badge|name)\b", lowered):
             return NOTE_KEY
+        # The profile keys are checked before the broad office and laptop
+        # wording. "Which floor am I on?" says nothing about a laptop, but
+        # "what laptop model" must not be answered with the laptop id, and
+        # "who is my manager" must not be answered with the office.
+        if re.search(r"\b(operating system|windows|macos|linux)\b", lowered):
+            return "os"
+        if re.search(r"\blaptop model\b|\bmodel\b", lowered):
+            return "laptop_model"
+        if re.search(r"\bfloor\b", lowered):
+            return "floor"
+        if re.search(r"\bdepartments?\b", lowered):
+            return "department"
+        if re.search(r"\b(managers?|boss|supervisor)\b", lowered):
+            return "manager"
+        if re.search(r"\b(call|reach|contact)\b", lowered) and re.search(r"\b(time|when|morning|afternoon)\b", lowered):
+            return "contact_time"
+        if re.search(r"\b(vpn client|anyconnect)\b", lowered):
+            return "vpn_client"
+        if re.search(r"\b(phone|number|mobile)\b", lowered):
+            return "personal_phone"
         if re.search(
             r"\b(sit|seat|desk|office|work|location|located|based|workplace)\b",
             lowered,
@@ -377,23 +475,33 @@ class SemanticMemory:
         password question does not get pulled toward a stored fact.
         """
         lowered = query.lower()
-        if re.search(
-            r"\b(sit|seat|desk|office|work|location|located|based|workplace)\b",
-            lowered,
-        ):
-            return f"office: {query}"
         # "What colour is my laptop bag?" is about the bag, not the laptop
         # id. Routing it to "laptop:" made the badge number (stored under
         # asset_id) the answer. A colour, a bag, or a badge stays as the
         # question, so it can match the note that stated it.
         if re.search(r"\b(colour|color|bag|badge|name)\b", lowered):
             return query
+        # The same order as _wanted_key. A floor question must not be
+        # rephrased as an office question just because it also says "sit".
+        for key, pattern in (
+            ("os", r"\b(operating system|windows|macos|linux)\b"),
+            ("laptop_model", r"\blaptop model\b|\bmodel\b"),
+            ("floor", r"\bfloor\b"),
+            ("department", r"\bdepartments?\b"),
+            ("manager", r"\b(managers?|boss|supervisor)\b"),
+            ("contact_time", r"\b(call|reach|contact)\b"),
+            ("vpn_client", r"\b(vpn client|anyconnect)\b"),
+            ("personal_phone", r"\b(phone|number|mobile)\b"),
+        ):
+            if re.search(pattern, lowered):
+                return f"{FACT_LABELS[key]}: {query}"
+        if re.search(
+            r"\b(sit|seat|desk|office|work|location|located|based|workplace)\b",
+            lowered,
+        ):
+            return f"office: {query}"
         if re.search(r"\b(laptops?|assets?|machines?|computers?|devices?)\b", lowered):
             return f"laptop: {query}"
-        # "Where do I sit?" contains "do", which is not a manager question.
-        # The word has to be the subject of the question, not a helper verb.
-        if re.search(r"\b(manager|boss|supervisor)\b", lowered):
-            return f"manager: {query}"
         return query
 
     def _next_id(self) -> str:
@@ -419,6 +527,52 @@ class SemanticMemory:
         lines = [json.dumps(row, ensure_ascii=False) for row in rows]
         text = ("\n".join(lines) + "\n") if lines else ""
         self.path.write_text(text, encoding="utf-8")
+
+
+def profile_facts(text: str) -> dict[str, str]:
+    """The profile facts a sentence states, keyed by PROFILE_KEYS.
+
+    A sentence can state two, such as an office and a floor. A sentence
+    that states none returns an empty dict. Values are normalised to the
+    form the scripted conversation records: "third floor" becomes
+    "3rd floor", "Windows 11" keeps its capitals, a phone keeps its space.
+    """
+    found: dict[str, str] = {}
+    for key, pattern in _PROFILE_PATTERNS.items():
+        match = pattern.search(text or "")
+        if match is None:
+            continue
+        raw = next(group for group in match.groups() if group)
+        found[key] = _normalise_profile(key, raw)
+    return found
+
+
+def _normalise_profile(key: str, raw: str) -> str:
+    value = re.sub(r"\s+", " ", raw).strip(" .")
+    if key == "os":
+        # "windows 11" and "Windows11" both become "Windows 11".
+        name = re.match(r"(Windows|macOS|Linux)\s*(\d*)", value, re.IGNORECASE)
+        if name:
+            label = {"windows": "Windows", "macos": "macOS", "linux": "Linux"}[name.group(1).lower()]
+            return f"{label} {name.group(2)}".strip()
+    if key == "laptop_model":
+        return value.upper()
+    if key in ("office", "department"):
+        return value.lower() if key == "department" else value[:1].upper() + value[1:]
+    if key == "floor":
+        word = value.split()[0].lower()
+        ordinal = _ORDINALS.get(word, word)
+        return f"{ordinal} floor"
+    if key == "manager":
+        return " ".join(part[:1].upper() + part[1:].lower() for part in value.split())
+    if key == "contact_time":
+        return value.lower()
+    if key == "vpn_client":
+        return "Cisco AnyConnect"
+    if key == "personal_phone":
+        digits = re.sub(r"\s+", "", value)
+        return f"{digits[:5]} {digits[5:]}"
+    return value
 
 
 def _now() -> str:
