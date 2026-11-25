@@ -243,3 +243,25 @@ def test_a_day_answer_is_not_stored_as_the_place(monkeypatch):
     )
     assert result["slots"]["location"] is None
     assert result["slots"]["date"] == "Monday"
+
+
+def test_the_same_time_is_a_booking_answer_only_while_a_question_is_open(monkeypatch):
+    open_question = understand(
+        "The same time is fine.",
+        pending_question="What time of day works?",
+    )
+    assert open_question["intent"] == "book_slot"
+    assert open_question["source"] == "rule"
+    assert open_question["slots"]["time"] is None
+
+    # No question is open, so the rule stays out and the model is asked.
+    called = {}
+
+    def fake(prompt, **kwargs):
+        called["prompt"] = prompt
+        return '{"intent": "out_of_scope", "slots": {}}'
+
+    monkeypatch.setattr("src.nlu.chat", fake)
+    alone = understand("The same time is fine.")
+    assert alone["intent"] == "out_of_scope"
+    assert "The same time is fine." in called["prompt"]

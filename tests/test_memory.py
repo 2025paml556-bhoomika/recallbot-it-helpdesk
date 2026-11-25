@@ -365,3 +365,54 @@ def test_asset_wording_is_searched_as_a_laptop(tmp_path):
         assert hits, question
         assert hits[0]["key"] == "asset_id"
         assert hits[0]["value"] == "LAP-T14G3"
+
+
+def test_the_window_quotes_only_completed_turns():
+    from src.history import earlier_turns, window_text
+
+    history = [
+        {"text": "I sit at the Pune office.", "bot": "Noted."},
+        {"text": "Where do I sit?", "bot": "Pune."},
+        {"text": "And the floor?", "intent": "recall_fact"},
+    ]
+    done = earlier_turns(history)
+    assert [row["user"] for row in done] == ["I sit at the Pune office.", "Where do I sit?"]
+    assert "And the floor?" not in window_text(history, "full")
+    assert "Pune office" in window_text(history, "full")
+    # summary with no notes yet still quotes the last two completed turns.
+    shown = window_text(history, "summary", summary="")
+    assert "Earlier turns:" in shown
+    assert "Notes so far:" not in shown
+    noted = window_text(history, "summary", summary="U1 sits in Pune.")
+    assert noted.startswith("Notes so far:")
+    assert "U1 sits in Pune." in noted
+
+
+def test_a_summary_folds_in_only_the_turns_it_has_not_covered(monkeypatch, tmp_path):
+    """Turns 1 and 2 are summarised once. Turn 3 does not send them again."""
+    from src.history import WorkingMemory
+
+    sent = []
+
+    def fake_chat(prompt, **kwargs):
+        sent.append(prompt)
+        return "notes: " + prompt
+
+    monkeypatch.setattr("src.history.chat", fake_chat)
+    notes = WorkingMemory("U1", "A", root=tmp_path)
+    notes.update([{"user": "turn one", "bot": "ok"}], turn=3)
+    assert notes.covered == 1
+    notes.update([{"user": "turn two", "bot": "ok"}], turn=4)
+    assert notes.covered == 2
+    assert "turn one" in sent[0]
+    # The second call is handed the notes so far, then only the new turn.
+    assert sent[1].rstrip().endswith("User: turn two\nBot: ok")
+    # The notes so far repeat the first call, so "New turns" appears twice.
+    # The new-turn block itself names only turn two.
+    head, _, fresh = sent[1].rpartition("New turns:")
+    assert "turn two" in fresh
+    assert "turn one" not in fresh
+
+    reloaded = WorkingMemory("U1", "A", root=tmp_path)
+    assert reloaded.covered == 2
+    assert "turn two" in reloaded.summary

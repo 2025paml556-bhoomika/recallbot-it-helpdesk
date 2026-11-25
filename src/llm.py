@@ -72,6 +72,7 @@ def chat(
     user: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     retrieved_tokens: int = 0,
     timeout: float = 120.0,
     trace: list | None = None,
@@ -140,6 +141,7 @@ def chat(
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={
             "temperature": temperature,
             "top_p": top_p,

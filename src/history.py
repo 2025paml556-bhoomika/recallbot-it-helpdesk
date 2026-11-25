@@ -63,6 +63,43 @@ def render(turns: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def earlier_turns(history: list[dict]) -> list[dict]:
+    """The completed exchanges, not the message being answered.
+
+    The last row is the current turn. It has the user text and no reply yet,
+    so it is not part of the history the strategy windows over. A session
+    with only the current turn has no earlier history.
+    """
+    done = []
+    for turn in history[:-1]:
+        if not turn.get("bot"):
+            continue
+        done.append({"user": turn.get("text", ""), "bot": turn.get("bot", "")})
+    return done
+
+
+def window_text(history: list[dict], strategy: str, summary: str = "") -> str:
+    """The earlier conversation the reply may see, under one strategy.
+
+    full sends every completed turn. trim sends the last K_TURNS. summary
+    sends the rolling notes plus the last two turns. The current message is
+    not included: the caller already puts it in the prompt. An empty window
+    is an empty string, so the first turn of a session adds nothing.
+    """
+    shown = select(earlier_turns(history), strategy)
+    lines = []
+    if strategy == "summary" and summary.strip():
+        lines.append("Notes so far:")
+        lines.append(summary.strip())
+    rendered = render(shown)
+    if rendered:
+        if lines:
+            lines.append("")
+        lines.append("Earlier turns:")
+        lines.append(rendered)
+    return "\n".join(lines)
+
+
 class WorkingMemory:
     """The rolling summary for one user in one session.
 
@@ -77,6 +114,9 @@ class WorkingMemory:
         base = root if root is not None else WORKING_DIR
         self.path = base / user / f"{session}.json"
         self.summary = ""
+        # How many completed turns the summary already covers. The two newest
+        # turns are quoted verbatim, so they are not counted here.
+        self.covered = 0
         self._load()
 
     def update(
@@ -85,6 +125,7 @@ class WorkingMemory:
         *,
         turn: int | None = None,
         trace: list | None = None,
+        run_id: str | None = None,
     ) -> str:
         """Rewrite the summary to include the turns since the last one.
 
@@ -106,7 +147,9 @@ class WorkingMemory:
             session=self.session,
             turn=turn,
             trace=trace,
+            run_id=run_id,
         ).strip()
+        self.covered += len(history)
         self._save()
         return self.summary
 
@@ -114,6 +157,7 @@ class WorkingMemory:
         """Drop the summary. Returns its text, for the episode written after."""
         text = self.summary
         self.summary = ""
+        self.covered = 0
         if self.path.exists():
             self.path.unlink()
         return text
@@ -122,12 +166,18 @@ class WorkingMemory:
         if self.path.exists():
             saved = json.loads(self.path.read_text(encoding="utf-8"))
             self.summary = saved.get("summary", "")
+            self.covered = int(saved.get("covered", 0))
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
             json.dumps(
-                {"user": self.user, "session": self.session, "summary": self.summary},
+                {
+                    "user": self.user,
+                    "session": self.session,
+                    "summary": self.summary,
+                    "covered": self.covered,
+                },
                 ensure_ascii=False,
                 indent=2,
             ),

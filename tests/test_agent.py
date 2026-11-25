@@ -1848,3 +1848,137 @@ def test_ok_with_nothing_booked_is_still_not_a_refusal(monkeypatch, tmp_path):
     said = session.reply("ok", session.decide("ok"))
     assert said == REPLIES["ack"]
     assert REPLIES["out_of_scope"] not in said
+
+
+def test_trim_shows_only_the_last_four_turns(monkeypatch, tmp_path):
+    """Turn 10's reply sees turns 6 to 9, and not turn 1.
+
+    The window is attached to a tool reply. An open turn has a required
+    line and is not shown the earlier turns, so it cannot prove the window.
+    """
+    monkeypatch.setattr(
+        "src.agent.understand",
+        lambda text, **kwargs: {"intent": "out_of_scope", "slots": {}, "source": "rule"},
+    )
+    monkeypatch.setattr("src.agent.chat", lambda prompt, **kwargs: "Noted.")
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path), strategy="trim")
+    for number in range(1, 10):
+        text = f"Message number {number} about nothing in particular."
+        session.ingest(text)
+        session.reply(text, {"action": "none"})
+    seen = {}
+
+    def capture(prompt, **kwargs):
+        seen["prompt"] = prompt
+        return "Noted."
+
+    monkeypatch.setattr("src.agent.chat", capture)
+    text = "Message number 10 about nothing in particular."
+    session.ingest(text)
+    session.reply(text, {"action": "tool", "name": "search_kb", "result": []})
+
+    assert "Message number 1 " not in seen["prompt"]
+    assert "Message number 5 " not in seen["prompt"]
+    for number in (6, 7, 8, 9):
+        assert f"Message number {number} " in seen["prompt"]
+    # The current message is the question, not a line of earlier history.
+    assert seen["prompt"].count("Message number 10 ") == 1
+
+
+def test_full_shows_every_earlier_turn(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        lambda text, **kwargs: {"intent": "out_of_scope", "slots": {}, "source": "rule"},
+    )
+    monkeypatch.setattr("src.agent.chat", lambda prompt, **kwargs: "Noted.")
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path), strategy="full")
+    for number in range(1, 6):
+        text = f"Message number {number} about nothing in particular."
+        session.ingest(text)
+        session.reply(text, {"action": "none"})
+    seen = {}
+    monkeypatch.setattr(
+        "src.agent.chat",
+        lambda prompt, **kwargs: seen.setdefault("prompt", prompt) or "Noted.",
+    )
+    text = "Message number 6 about nothing in particular."
+    session.ingest(text)
+    session.reply(text, {"action": "tool", "name": "search_kb", "result": []})
+    for number in range(1, 6):
+        assert f"Message number {number} " in seen["prompt"]
+
+
+def test_summary_quotes_the_notes_and_the_last_two_turns(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        lambda text, **kwargs: {"intent": "out_of_scope", "slots": {}, "source": "rule"},
+    )
+    summarised = []
+
+    def reply(prompt, **kwargs):
+        return "Noted."
+
+    def summarise(prompt, **kwargs):
+        summarised.append(prompt)
+        return "U1 mentioned the VPN once."
+
+    monkeypatch.setattr("src.agent.chat", reply)
+    monkeypatch.setattr("src.history.chat", summarise)
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path), strategy="summary")
+    for number in range(1, 5):
+        text = f"Message number {number} about nothing in particular."
+        session.ingest(text)
+        session.reply(text, {"action": "none"})
+    seen = {}
+
+    def capture(prompt, **kwargs):
+        seen["prompt"] = prompt
+        return "Noted."
+
+    monkeypatch.setattr("src.agent.chat", capture)
+    text = "Message number 5 about nothing in particular."
+    session.ingest(text)
+    session.reply(text, {"action": "tool", "name": "search_kb", "result": []})
+
+    assert "Notes so far:" in seen["prompt"]
+    assert "U1 mentioned the VPN once." in seen["prompt"]
+    assert "Message number 3 " in seen["prompt"]
+    assert "Message number 4 " in seen["prompt"]
+    # Turn 1 has fallen out of the quoted window. It was summarised once,
+    # on the turn it first fell out, and not again on the next turn.
+    assert "User: Message number 1 " not in seen["prompt"]
+    # Turn 5's reply is a tool call, so it builds no summary of its own.
+    # The one summarise call was made when turn 1 first fell out of the window.
+    assert len(summarised) == 1
+    assert "Message number 1 " in summarised[0]
+
+
+def test_an_unknown_strategy_is_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        Session("U1", "A", memory=Memory("U1", "A", root=tmp_path), strategy="window")
+
+
+def test_the_same_time_reuses_the_booked_time(monkeypatch, tmp_path):
+    """'The same time is fine' is not a yes. It fills the time from the visit."""
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"And for Friday?": {"intent": "book_slot", "slots": {"date": "Friday"}}}),
+    )
+    db_path = tmp_path / "helpdesk.sqlite"
+    session = Session("U1", "A", db_path=db_path, memory=Memory("U1", "A", root=tmp_path))
+    session.slots["location"] = "Pune office, 3rd floor, desk 14"
+    session.last_booked = {
+        "location": "Pune office, 3rd floor, desk 14",
+        "date": "Thursday",
+        "time": "4 pm",
+    }
+    session.ingest("And for Friday?")
+    asked = session.decide("And for Friday?")
+    assert asked["slot"] == "time"
+
+    session.ingest("The same time is fine.")
+    decision = session.decide("The same time is fine.")
+    assert decision["action"] == ACTION_ASK
+    assert session.slots["time"] == "4 pm"
+    assert session.slots["date"] == "Friday"
+    assert _rows(db_path, "slots") == []

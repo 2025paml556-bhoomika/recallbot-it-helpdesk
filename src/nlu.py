@@ -177,6 +177,22 @@ def _rule_based(text: str) -> dict | None:
     return None
 
 
+# "The same time is fine" answers a booking question by pointing at the time
+# already given. It names no clock time, so the model calls it confirm and the
+# visit is written with no time. It is the time answer, not the yes.
+_SAME_TIME = re.compile(
+    r"\b(?:same|that)\s+time\b|\btime\s+is\s+fine\b",
+    re.IGNORECASE,
+)
+
+
+def _same_time(text: str) -> dict | None:
+    """A reply that reuses the time already on the visit, without naming one."""
+    if not _SAME_TIME.search(text or ""):
+        return None
+    return {"intent": "book_slot", "slots": empty_slots(), "source": "rule"}
+
+
 def _extract_json(reply: str) -> dict:
     """The model sometimes wraps JSON in a fence. Take the outermost object."""
     text = reply.strip()
@@ -351,6 +367,7 @@ def understand(
     turn: int | None = None,
     trace: list | None = None,
     pending_question: str | None = None,
+    run_id: str | None = None,
 ) -> dict:
     """Label one user sentence.
 
@@ -365,6 +382,10 @@ def understand(
     ruled = _rule_based(text)
     if ruled is not None:
         return ruled
+    # Only while a visit question is open. Said on its own, "same time" is
+    # not a booking answer and the model may label it however it reads.
+    if pending_question and _same_time(text) is not None:
+        return _same_time(text)
 
     reply = chat(
         _user_prompt(text, pending_question),
@@ -374,6 +395,7 @@ def understand(
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         trace=trace,
     )
     result = _normalise(_extract_json(reply))

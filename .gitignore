@@ -23,6 +23,13 @@ results/test_report_step*.txt
 index/*.faiss
 index/*.jsonl
 
+# Recreated by `python -m src.db`.
+db/*.sqlite
+
 # Local model caches
 .cache/
 models/
+
+# Recreated as the bot remembers facts, episodes, and conversation transcripts.
+memory/*
+!memory/.gitkeep

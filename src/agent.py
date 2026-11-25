@@ -23,9 +23,10 @@ import json
 
 import re
 
+from src.history import STRATEGIES, window_text
 from src.llm import chat
 from src.memory import Memory
-from src.nlu import SLOT_NAMES, understand
+from src.nlu import SLOT_NAMES, _SAME_TIME, understand
 from src.search_kb import RELEVANCE_THRESHOLD
 from src.tools import (
     NOT_FOUND,
@@ -114,6 +115,17 @@ def load_skill(path) -> str:
     if not text:
         raise ValueError(f"skill file is empty: {path}")
     return text
+
+
+def _with_history(prompt: str, history: str) -> str:
+    """Put the strategy's window in front of the current turn.
+
+    An empty window leaves the prompt unchanged, so the first turn of a
+    session reads exactly as it did before short-term memory existed.
+    """
+    if not history.strip():
+        return prompt
+    return f"{history}\n\n{prompt}"
 
 
 def reply_system(booking: bool) -> str:
@@ -254,9 +266,15 @@ class Session:
     later session, starts empty and cannot read these.
     """
 
-    def __init__(self, user: str, session: str, db_path=None, memory=None) -> None:
+    def __init__(self, user: str, session: str, db_path=None, memory=None, strategy: str = "full") -> None:
+        if strategy not in STRATEGIES:
+            raise ValueError(f"strategy must be one of {STRATEGIES}, got {strategy!r}")
         self.user = user
         self.session = session
+        # Which earlier turns a reply is shown. The slot store is not trimmed.
+        self.strategy = strategy
+        # None logs under the process RUN_ID. A strategy run passes its own.
+        self.run_id: str | None = None
         self.turn = 0
         self.slots: dict[str, str | None] = {name: None for name in SLOT_NAMES}
         self.pending_booking = False
@@ -304,6 +322,7 @@ class Session:
             turn=self.turn,
             trace=self.calls,
             pending_question=self._pending_question(),
+            run_id=self.run_id,
         )
         self._merge(understood["intent"], understood["slots"])
         snapshot = {
@@ -482,7 +501,9 @@ class Session:
             # "12 PM" after "What time of day works?" is the open slot, not a
             # knowledge-base question. Search only when it filled nothing the
             # visit is still waiting for.
-            if self.pending_booking and self._filled_open_booking_slot():
+            if self.pending_booking and (
+                self._filled_open_booking_slot() or self.awaiting_confirmation
+            ):
                 return self._advance_booking()
             return self._tool(
                 "search_kb",
@@ -508,6 +529,10 @@ class Session:
             return self._advance_booking()
 
         if intent == "book_slot":
+            # "The same time is fine" names no clock time. The visit being
+            # changed still has one, and that is the time being accepted.
+            if _SAME_TIME.search(text) and not self.slots.get("time") and self.last_booked:
+                self.slots["time"] = self.last_booked.get("time")
             return self._advance_booking()
 
         if intent == "provide_info" and self.pending_booking and self.missing_booking_slots():
@@ -572,6 +597,8 @@ class Session:
                     )
                     tool_name = "book_it_slot"
                 self.note_booked(booked if isinstance(booked, dict) else None)
+                # The arguments below were copied before this call. They still
+                # name the day and the time; the slots themselves no longer do.
                 self.memory.remember_event(
                     (
                         f"Booked a visit at {booked['location']} on {booked['date']} "
@@ -802,7 +829,10 @@ class Session:
         else:
             raise ValueError(f"unknown tool: {name!r}")
 
-        prompt = f"User message: {text}\n\nTool result:\n{shown}"
+        prompt = _with_history(
+            f"User message: {text}\n\nTool result:\n{shown}",
+            self._history_block(),
+        )
         # A tool result is a task turn: temperature 0. The booking steps are
         # included when the reply confirms a visit that was just written, or
         # while one is still being collected. A ticket lookup is neither.
@@ -816,11 +846,9 @@ class Session:
             session=self.session,
             turn=self.turn,
             trace=self.calls,
+            run_id=self.run_id,
         ).strip()
         if name in ("book_it_slot", "update_slot"):
-            # The visit is written. Drop the day and time so the next visit
-            # cannot reuse them, after the reply has used them.
-            self.note_booked()
             # The model is told not to ask again, and still sometimes repeats
             # "Shall I book that visit?". The booking is already done, so
             # that sentence is replaced by the row that was written.
@@ -846,14 +874,21 @@ class Session:
         if self._asks_for_episode(text) and intent in ("out_of_scope", "recall_fact"):
             # Returned as written. An open turn is otherwise reworded by the
             # model, and a memory miss has no fact for it to rephrase.
-            self._log_exchange(text, REPLIES["recall_episode"])
+            # reply() records the exchange, so this return must not.
             return REPLIES["recall_episode"]
+        # A question about the user that matched nothing stored. Same reason:
+        # the model invents an office when it is asked to reword the miss.
+        if intent == "recall_fact":
+            return REPLIES["recall_fact"]
         # "ok" after a written visit is thanks. The same word with nothing
         # booked stays a short acknowledgement, not a refusal and not
         # "there is nothing waiting to book".
         if is_ack(text) and intent in ("out_of_scope", "confirm"):
             intent = "ack"
         required = REPLIES.get(intent, REPLIES["out_of_scope"])
+        # The window is not shown here. A required line is a refusal, a
+        # thanks, or "nothing waiting to book", and the model was copying an
+        # earlier "Booked slot" line out of the window instead of saying it.
         prompt = (
             f"User message: {text}\n\n"
             f"Required reply, which you may reword but must not change the meaning of:\n{required}"
@@ -868,7 +903,32 @@ class Session:
             session=self.session,
             turn=self.turn,
             trace=self.calls,
+            run_id=self.run_id,
         ).strip()
+
+    def _history_block(self) -> str:
+        """The earlier turns this strategy shows, not the message being answered.
+
+        summary also folds in the turns the window no longer quotes, so the
+        notes stay current. That is one model call, logged as "summarise".
+        full and trim only slice the list and make no call.
+        """
+        if self.strategy == "summary":
+            done = [
+                {"user": turn.get("text", ""), "bot": turn.get("bot", "")}
+                for turn in self.history[:-1]
+                if turn.get("bot")
+            ]
+            # The rolling notes cover everything except the two turns the
+            # prompt still quotes. Each new turn beyond those two is folded
+            # in once, rather than the whole session being re-summarised.
+            pending = done[: max(0, len(done) - 2)]
+            fresh = pending[self.memory.working.covered :]
+            if fresh:
+                self.memory.working.update(
+                    fresh, turn=self.turn, trace=self.calls, run_id=self.run_id
+                )
+        return window_text(self.history, self.strategy, self.memory.working.summary)
 
     def _log_exchange(self, user_text: str, reply: str) -> None:
         """Append this turn to the session's JSON file.
@@ -884,6 +944,9 @@ class Session:
         # still wants a turn number, and the session counter is the one this
         # reply was made under.
         turn = latest["turn"] if "turn" in latest else self.turn
+        # The next turn's window reads this reply. A row handed in by a test
+        # may have no text, and still gets the reply so the window is honest.
+        latest["bot"] = reply
         self.memory.conversation.append(
             user_text,
             reply,

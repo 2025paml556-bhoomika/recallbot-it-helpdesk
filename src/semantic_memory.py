@@ -279,6 +279,10 @@ class SemanticMemory:
             return f"office: {query}"
         if re.search(r"\b(laptops?|assets?|machines?|computers?|devices?)\b", lowered):
             return f"laptop: {query}"
+        # "Where do I sit?" contains "do", which is not a manager question.
+        # The word has to be the subject of the question, not a helper verb.
+        if re.search(r"\b(manager|boss|supervisor)\b", lowered):
+            return f"manager: {query}"
         return query
 
     def _next_id(self) -> str:
