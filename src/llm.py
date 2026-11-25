@@ -74,6 +74,7 @@ def chat(
     turn: int | None = None,
     run_id: str | None = None,
     retrieved_tokens: int = 0,
+    context=None,
     timeout: float = 120.0,
     trace: list | None = None,
 ) -> str:
@@ -83,9 +84,15 @@ def chat(
     carries the system prompt and the user prompt that were sent, on
     .system and .user, for the conversation log.
 
+    retrieved_tokens is the count of KB chunks, semantic memories and
+    episodic memories placed in this prompt. Pass the assembled context
+    and that count is read from it; a call with nothing retrieved logs 0.
+
     Logs exactly one line after a successful response. On any HTTP, network
     or payload error, raises LLMError and leaves the log unchanged.
     """
+    if context is not None:
+        retrieved_tokens = context.retrieved_tokens
     model_name = model or CHAT_MODEL
     messages: list[dict[str, str]] = []
     if system:

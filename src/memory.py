@@ -189,12 +189,22 @@ class Memory:
             removed["facts"] += self.semantic.forget_value(self.user, value)
         return removed
 
-    def record_turn(self, text: str, intent: str, slots: dict, turn: int) -> list[dict]:
+    def record_turn(
+        self,
+        text: str,
+        intent: str,
+        slots: dict,
+        turn: int,
+        *,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> list[dict]:
         """Write the facts this turn stated. Returns the records written.
 
-        confirm, reject, out_of_scope and recall_fact state no fact. Anything
-        else is handed to the semantic store, which itself writes nothing for
-        small talk or for a turn with no fact slot.
+        confirm, reject, out_of_scope and recall_fact state no fact and log
+        nothing. Anything else is handed to the semantic store, which itself
+        writes nothing for small talk. A turn that is extracted is logged as
+        call_type "extract", including one that states no fact.
         """
         if intent in _SKIP_INTENTS:
             return []
@@ -207,15 +217,26 @@ class Memory:
             # A visit place is not where the user sits, and the sentence is
             # not a standing note either. "Monday" must not be stored.
             remembered.pop("location", None)
-            return self.semantic.extract(self.user, "", remembered, turn)
+            return self.semantic.extract(
+                self.user, "", remembered, turn,
+                session=self.session, run_id=run_id, config=config,
+                log=False,
+            )
         if intent != "provide_info":
             # A fault report and a ticket check state no personal fact.
             # A laptop id stated along the way is still a laptop id. The
             # place in a fault ("on my floor") is the visit, not the office.
             asset = remembered.get("asset_id")
             only_asset = {"asset_id": asset} if isinstance(asset, str) else {}
-            return self.semantic.extract(self.user, "", only_asset, turn)
-        return self.semantic.extract(self.user, text, remembered, turn)
+            return self.semantic.extract(
+                self.user, "", only_asset, turn,
+                session=self.session, run_id=run_id, config=config,
+                log=False,
+            )
+        return self.semantic.extract(
+            self.user, text, remembered, turn,
+            session=self.session, run_id=run_id, config=config,
+        )
 
     def remember_event(
         self,
@@ -289,6 +310,8 @@ class Memory:
         body = render(turns) if turns else "(no turns)"
         # chat() logs this as call_type "reflect". log stays on, so the line
         # carries the API's own token counts rather than a zero.
+        # A reflection is written from the turns, not from retrieved memory.
+        # retrieved_tokens stays 0: nothing was placed in the prompt.
         return chat(
             f"Turns:\n{body}",
             system=REFLECT_SYSTEM,
@@ -301,6 +324,7 @@ class Memory:
             turn=turn,
             trace=trace,
             run_id=run_id,
+            retrieved_tokens=0,
         ).strip()
 
     def end_session(

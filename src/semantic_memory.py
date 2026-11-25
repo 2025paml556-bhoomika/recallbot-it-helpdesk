@@ -153,16 +153,32 @@ class SemanticMemory:
     def is_small_talk(self, text: str) -> bool:
         return bool(_SMALL_TALK.match(text.strip()))
 
-    def extract(self, user: str, text: str, slots: dict, turn: int) -> list[dict]:
+    def extract(
+        self,
+        user: str,
+        text: str,
+        slots: dict,
+        turn: int,
+        *,
+        session: str | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+        log: bool = True,
+    ) -> list[dict]:
         """Write one record per stated fact. Returns the records written.
 
-        A small-talk turn writes nothing. location and asset_id are written
-        from the slots. asset_id is written only when it is a laptop id
-        (LAP-...), so a badge number the model parked there is not stored
-        as the laptop. The nine profile keys are read from the sentence
-        itself, so a missing NLU slot cannot drop the operating system or
-        the phone number. Anything left over is one note. A new value of a
-        keyed fact replaces the old one. A new note does not.
+        A small-talk turn writes nothing and logs nothing. location and
+        asset_id are written from the slots. asset_id is written only when
+        it is a laptop id (LAP-...), so a badge number the model parked
+        there is not stored as the laptop. The nine profile keys are read
+        from the sentence itself, so a missing NLU slot cannot drop the
+        operating system or the phone number. Anything left over is one
+        note. A new value of a keyed fact replaces the old one. A new note
+        does not.
+
+        The step is logged as call_type "extract". The extraction is a
+        rule, so the line has 0 tokens. log=False is for a caller that
+        already logged the turn.
         """
         if self.is_small_talk(text):
             return []
@@ -186,7 +202,46 @@ class SemanticMemory:
         note = text.strip()
         if note and not self._covered_by_slots(note, slots) and not profile:
             written.append(self.remember(user, NOTE_KEY, note, turn))
+        if log:
+            self._log_extract(
+                user,
+                written,
+                turn,
+                session=session,
+                run_id=run_id,
+                config=config,
+            )
         return written
+
+    def _log_extract(
+        self,
+        user: str,
+        written: list[dict],
+        turn: int | None,
+        *,
+        session: str | None,
+        run_id: str | None,
+        config: str | None,
+    ) -> None:
+        """One line per extraction. Nothing was retrieved, so that count is 0."""
+        import time
+
+        from src.logger import log_call
+
+        log_call(
+            call_type="extract",
+            model="rule",
+            input_tokens=0,
+            output_tokens=0,
+            start=time.time(),
+            retrieved_tokens=0,
+            config=config,
+            user=user,
+            session=session,
+            turn=turn,
+            run_id=run_id,
+            extra={"n_facts": len(written), "keys": [row["key"] for row in written]},
+        )
 
     def _covered_by_slots(self, text: str, slots: dict) -> bool:
         """True when the sentence only restates the office or the laptop id.

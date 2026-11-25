@@ -35,6 +35,41 @@ def _stub_embed(monkeypatch):
     monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
 
 
+def test_extracting_a_fact_is_logged_and_small_talk_is_not(tmp_path, monkeypatch):
+    """call_type "extract" is written once per extraction, never for small talk."""
+    import json
+
+    import src.logger as logger
+
+    path = tmp_path / "calls.jsonl"
+    monkeypatch.setattr(logger, "LOG_PATH", path)
+
+    store = SemanticMemory(tmp_path / "memory")
+    written = store.extract(
+        "U1",
+        "I sit at the Pune office.",
+        {"location": "Pune office"},
+        turn=2,
+        session="A",
+        config="hybrid_sem",
+    )
+    assert written
+    assert store.extract("U1", "Thanks!", {}, turn=3, session="A", config="hybrid_sem") == []
+
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["call_type"] == "extract"
+    assert lines[0]["model"] == "rule"
+    assert lines[0]["input_tokens"] == 0
+    assert lines[0]["output_tokens"] == 0
+    assert lines[0]["retrieved_tokens"] == 0
+    assert lines[0]["user"] == "U1"
+    assert lines[0]["session"] == "A"
+    assert lines[0]["turn"] == 2
+    assert lines[0]["config"] == "hybrid_sem"
+    assert "location" in lines[0]["keys"]
+
+
 def test_a_stated_fact_is_stored_and_small_talk_is_not(tmp_path):
     store = SemanticMemory(tmp_path)
     written = store.extract(

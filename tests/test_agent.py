@@ -753,7 +753,7 @@ def test_ask_kb_during_a_booking_still_searches_when_no_slot_was_filled(monkeypa
     assert decision["name"] == "search_kb"
 
 
-def test_provide_info_and_a_greeting_call_nothing(monkeypatch, tmp_path):
+def test_provide_info_logs_the_extraction_and_a_greeting_calls_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.agent.understand",
         _scripted(
@@ -778,7 +778,14 @@ def test_provide_info_and_a_greeting_call_nothing(monkeypatch, tmp_path):
     assert session.slots["location"] == "Pune office"
     assert _rows(db_path, "tickets") == []
     assert _rows(db_path, "slots") == []
-    assert _log_len() == before
+    # The greeting ran nothing. Stating the office is an extraction, which
+    # is logged as its own line and is not a tool call.
+    added = [json.loads(line) for line in _log_lines()[before:]]
+    assert [row["call_type"] for row in added] == ["extract"]
+    assert added[0]["user"] == "U1"
+    assert added[0]["turn"] == 1
+    assert added[0]["retrieved_tokens"] == 0
+    assert "location" in added[0]["keys"]
 
 
 def _scripted_chat(replies: dict[str, str]):

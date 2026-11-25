@@ -19,7 +19,9 @@ Gaps 1–8 compare the plan text with the PDF. Gaps 9–16 came from a second pa
 - Fix: pick one model and use it for every config (`full`, `trim`, `summary`, `no_rag`, `hybrid`, `hybrid_sem`, `hybrid_mem`). The header and Step 1 must name the same model.
 - Repo check: `src/config.py` sets `CHAT_MODEL = "qwen2.5:3b"`, and every chat call in `logs/calls.jsonl` used it. Only the plan header is wrong; change it to Qwen2.5-3B via Ollama.
 
-### 2. Log schema drops three required fields
+### 2. Log schema drops three required fields — fixed
+
+The plan's Step 1 validate line now names all twelve fields. The code fills `retrieved_tokens` from the prompt: `Context.retrieved_tokens` counts the KB chunks, semantic memories and episodic memories that were kept, and `Session.reply` passes that into `chat()`. NLU, summary, reflect, tool, extract and a reply with nothing retrieved log 0. Fact extraction writes one `extract` line per turn (a rule, 0 tokens); small talk writes none. A smoke test still has null `user`, `session`, `turn` and `config`, because it is not a session. Old log lines are left as they are.
 
 - PDF: every line in `logs/calls.jsonl` includes `ts`, `run_id`, `config`, `user`, `session`, `turn`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens`, `latency_ms`.
 - Plan Step 1 validate list: run_id, call_type, model, input/output tokens, latency. It does not require `user`, `session`, or `turn`.

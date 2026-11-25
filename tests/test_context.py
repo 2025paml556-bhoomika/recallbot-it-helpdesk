@@ -30,6 +30,52 @@ def test_the_budget_is_the_window_minus_the_reply_reserve():
     assert PROMPT_BUDGET == CONTEXT_WINDOW - REPLY_RESERVE_TOKENS
 
 
+def test_retrieved_tokens_count_only_what_was_placed_in_the_prompt():
+    """KB chunks, facts and episodes count. A dropped chunk does not.
+
+    History, the system prompt and the tool result are not retrieved, so
+    they stay out of the number. Nothing retrieved is 0.
+    """
+    built = assemble(
+        system="You are the IT helpdesk.",
+        tool_result="Ticket TCK-0001 is open.",
+        facts=[{"id": "sem-0001", "key": "office", "value": "Hyderabad"}],
+        episodes=[{"id": "ep-0007", "text": "Booked a visit."}],
+        history="User: Hi.\nBot: Hi.",
+        chunks=[{"doc_id": "KB-VPN", "chunk_id": "KB-VPN@2026.1:128:0", "text": "The tunnel dropped."}],
+        current="What does ERR-VPN-809 mean?",
+    )
+    placed = [
+        row["tokens"]
+        for row in built.rows
+        if row["part"] in ("long_term_memory", "retrieved_knowledge") and row["location"] == "prompt"
+    ]
+    assert placed
+    assert built.retrieved_tokens == sum(placed)
+    assert built.retrieved_tokens > 0
+
+    empty = assemble(system="You are the IT helpdesk.", current="Hi.")
+    assert empty.retrieved_tokens == 0
+
+    chunks = [
+        {"doc_id": "KB-VPN", "chunk_id": f"c{i}", "text": _big(f"chunk{i}", 400)}
+        for i in range(6)
+    ]
+    tight = assemble(system="You are the IT helpdesk.", chunks=chunks, current="What does the code mean?")
+    kept = sum(
+        row["tokens"]
+        for row in tight.rows
+        if row["part"] == "retrieved_knowledge" and row["location"] == "prompt"
+    )
+    dropped = sum(
+        row["tokens"]
+        for row in tight.rows
+        if row["part"] == "retrieved_knowledge" and row["location"] == "external"
+    )
+    assert dropped > 0
+    assert tight.retrieved_tokens == kept
+
+
 def test_a_small_prompt_keeps_every_part_and_fits():
     built = assemble(
         system="You are the IT helpdesk.",

@@ -139,6 +139,8 @@ class WorkingMemory:
             f"Notes so far:\n{self.summary or '(none)'}\n\n"
             f"New turns:\n{render(history)}"
         )
+        # The notes are the session's own turns, not a retrieved memory, so
+        # retrieved_tokens is 0.
         self.summary = chat(
             prompt,
             system=SUMMARY_SYSTEM,
@@ -150,6 +152,7 @@ class WorkingMemory:
             turn=turn,
             trace=trace,
             run_id=run_id,
+            retrieved_tokens=0,
         ).strip()
         self.covered += len(history)
         self._save()

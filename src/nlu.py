@@ -432,6 +432,8 @@ def understand(
     if pending_question and _same_time(text) is not None:
         return _same_time(text)
 
+    # Labelling reads the sentence only. No chunk or memory is retrieved,
+# so retrieved_tokens is 0.
     reply = chat(
         _user_prompt(text, pending_question),
         system=SYSTEM_PROMPT,
@@ -443,6 +445,7 @@ def understand(
         turn=turn,
         run_id=run_id,
         trace=trace,
+        retrieved_tokens=0,
     )
     result = _normalise(_extract_json(reply))
     result = _apply_known_codes(text, result)

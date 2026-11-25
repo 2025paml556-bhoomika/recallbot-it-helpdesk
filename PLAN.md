@@ -52,8 +52,9 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 - [x] Start `README.md` with setup and run commands
 - [x] Set up `.gitignore` and commit
 
-**✅ Validate:** `pip install -r requirements.txt` succeeds, all folders exist, one test chat call through `src/llm.py` returns a reply, and `logs/calls.jsonl` gains exactly one line with all the required fields (run_id, call_type, model, input/output tokens, latency).
+**✅ Validate:** `pip install -r requirements.txt` succeeds, all folders exist, one test chat call through `src/llm.py` returns a reply, and `logs/calls.jsonl` gains exactly one line with every required field: `ts`, `run_id`, `config`, `user`, `session`, `turn`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens`, `latency_ms`. `config` is one of `full`, `trim`, `summary`, `no_rag`, `hybrid`, `hybrid_sem`, `hybrid_mem`. `call_type` is one of `nlu`, `chat`, `summary`, `extract`, `importance`, `reflect`, `embed`, `tool`, `judge`. A tool line has 0 tokens and a measured latency. `retrieved_tokens` counts the KB chunks, semantic memories and episodic memories placed in the prompt, and is 0 when nothing was retrieved. Lines are only ever appended.
   - Checked: folders exist, `pytest tests/test_step1.py` passes (2 offline, 2 live against Ollama), and `logs/calls.jsonl` has the smoke-test lines with every required field. The dependency install was verified earlier in the Step 1 session.
+  - `retrieved_tokens` is filled from the assembled prompt. `Context.retrieved_tokens` sums the KB, semantic and episodic rows that were kept, and `Session.reply` passes that context into `chat()`. A call that retrieves nothing (NLU, the rolling summary, a reflection, an open reply, a tool, an extraction) logs 0. A smoke test has no session, so its `user`, `session`, `turn` and `config` stay null.
 
 ## 2. Knowledge base · Task 1 · depends on 1
 - [x] Write 15+ IT documents in `data/kb/`, 4,000–8,000 words in total. Topics:
@@ -167,7 +168,9 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 
 ## 7. Semantic memory · Task 3(c) (1 mark) · depends on 5
 - [ ] `src/semantic_memory.py`: records `{user, key, value, source_turn, date, status}` in `memory/semantic.jsonl`, plus a vector index
-- [ ] An LLM extraction step, logged as `extract`. Small-talk turns produce no record
+- [~] An extraction step, logged as `extract`. Small-talk turns produce no record
+  - Done: a `provide_info` turn calls `SemanticMemory.extract`, which writes the facts and appends one `extract` line (a rule, 0 tokens, `retrieved_tokens` 0). Small talk, a greeting, a booking answer and a fault report write nothing and log nothing.
+  - Still open: the step is a rule over the planted sentence patterns, not an LLM call, and precision and recall are not measured yet.
 - [ ] Update: the old record is marked `superseded`, so only `active` records are retrieved
 - [ ] Forget: delete from the JSONL file **and** the vector index
 - [ ] Measure extraction precision and recall against the facts planted in Task 1

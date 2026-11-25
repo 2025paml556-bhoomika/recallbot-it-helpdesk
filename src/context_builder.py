@@ -109,6 +109,10 @@ class Context:
     prompt is the user message. The system prompt is separate, because the
     chat call sends it as its own message. total counts both, since the
     window holds both.
+
+    retrieved_tokens is the tokens of the KB chunks, semantic memories and
+    episodic memories that were actually placed in the prompt. A part that
+    was dropped, or never supplied, counts as 0.
     """
 
     def __init__(self, prompt: str, system: str, rows: list[dict]) -> None:
@@ -129,6 +133,21 @@ class Context:
 
     def within_budget(self) -> bool:
         return self.total <= PROMPT_BUDGET
+
+    @property
+    def retrieved_tokens(self) -> int:
+        """Tokens of retrieved material that made it into the prompt.
+
+        Only the rows marked "prompt" count. A chunk or a memory that was
+        cut to fit the budget stays external and is not in this number.
+        History, the system prompt and the tool result are not retrieved.
+        """
+        counted = ("long_term_memory", "retrieved_knowledge")
+        return sum(
+            row["tokens"]
+            for row in self.rows
+            if row["part"] in counted and row["location"] == "prompt"
+        )
 
     def table(self) -> list[dict]:
         """One row per part: tokens, memory type, prompt or external."""

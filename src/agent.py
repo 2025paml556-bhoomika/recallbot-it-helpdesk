@@ -466,6 +466,8 @@ class Session:
             understood["intent"],
             understood["slots"],
             self.turn,
+            run_id=self.run_id,
+            config=self._config_name(),
         )
         self._note_decision(text, understood["intent"])
         return {
@@ -1057,6 +1059,7 @@ class Session:
             turn=self.turn,
             trace=self.calls,
             run_id=self.run_id,
+            context=built,
         ).strip()
         if name in ("book_it_slot", "update_slot"):
             # The model is told not to ask again, and still sometimes repeats
@@ -1135,6 +1138,7 @@ class Session:
             turn=self.turn,
             trace=self.calls,
             run_id=self.run_id,
+            context=built,
         ).strip()
 
     def _history_block(self) -> str:
