@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 
 from src.agent import Session
 from src.config import DB_PATH
+from src.history import STRATEGIES
 from src.episodic_memory import EPISODIC_PATH
 from src.semantic_memory import SEMANTIC_PATH
 from src.db import connect
@@ -34,14 +35,18 @@ _sessions: dict[tuple[str, str], Session] = {}
 _lock = threading.Lock()
 
 
-def get_session(user: str, session: str) -> Session:
+def get_session(user: str, session: str, strategy: str = "full") -> Session:
     # The page sends the id it minted for this tab. A missing one still has
-    # to name something, but a real tab always sends its own.
+    # to name something, but a real tab always sends its own. The strategy is
+    # fixed when the session is created: changing it in the page starts a new
+    # conversation, so a chat is never half full and half trim.
+    chosen = strategy if strategy in STRATEGIES else "full"
     key = (user.strip() or "U1", session.strip() or "tab")
     with _lock:
         found = _sessions.get(key)
         if found is None:
-            found = Session(*key)
+            found = Session(*key, strategy=chosen)
+            found.run_id = f"stm-{chosen}"
             _sessions[key] = found
         return found
 
@@ -114,9 +119,9 @@ def _changed_slot(decision: dict) -> int | None:
     return slot_id if isinstance(slot_id, int) else None
 
 
-def turn(user: str, session: str, text: str) -> dict:
+def turn(user: str, session: str, text: str, strategy: str = "full") -> dict:
     """One user message through the real agent. Recall is captured before write."""
-    current = get_session(user, session)
+    current = get_session(user, session, strategy)
     labelled = current.ingest(text)
     decision = current.decide(text)
     said = current.reply(text, decision)
@@ -142,6 +147,8 @@ def turn(user: str, session: str, text: str) -> dict:
         },
         "state": snapshot(user),
         "changed_slot": _changed_slot(decision),
+        "strategy": current.strategy,
+        "window": current._history_block(),
     }
 
 
@@ -211,7 +218,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not text:
                     self._send_json({"error": "type a message first"}, status=400)
                     return
-                self._send_json(turn(user, session, text))
+                strategy = str(body.get("strategy") or "full")
+                self._send_json(turn(user, session, text, strategy))
             elif path == "/api/forget":
                 self._send_json(forget(user, session, str(body.get("value") or "")))
             elif path == "/api/end":
@@ -307,6 +315,13 @@ PAGE = """<!DOCTYPE html>
   <label>User
     <select id="user"><option>U1</option><option>U2</option></select>
   </label>
+  <label>Memory
+    <select id="strategy">
+      <option value="full">full</option>
+      <option value="trim">trim</option>
+      <option value="summary">summary</option>
+    </select>
+  </label>
   <button type="button" class="ghost" id="do-clear">Clear this user</button>
   <span id="session-label"></span>
   <span style="font:12px sans-serif;color:#9a9084">Each tab is its own session. Facts in memory/ carry over; this tab's slots do not.</span>
@@ -356,7 +371,9 @@ if (!sessionId) {
 }
 $("session-label").textContent = "Session " + sessionId;
 
-function who() { return { user: $("user").value, session: sessionId }; }
+function who() {
+  return { user: $("user").value, session: sessionId, strategy: $("strategy").value };
+}
 
 function add(cls, text) {
   const div = document.createElement("div");
@@ -460,8 +477,12 @@ $("composer").addEventListener("submit", async (event) => {
     const data = await post("/api/turn", { text });
     add("bot", data.reply);
     note("<b>" + data.intent + "</b> via " + data.source +
-      " · turn " + data.turn + " · action " + data.action +
-      (data.tool ? " (" + data.tool + ")" : ""));
+      " · turn " + data.turn + " · " + data.strategy +
+      " · action " + data.action +
+      (data.tool ? " (" + data.tool + ")" : "") +
+      (data.window ? "<br><b>window sent:</b><br>" +
+        data.window.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\\n/g, "<br>")
+        : "<br><b>window sent:</b> none"));
     renderRecalled(data.recalled, data.slots);
     changedSlot = data.changed_slot;
     renderState(data.state);
@@ -510,6 +531,12 @@ $("do-clear").addEventListener("click", async () => {
   } catch (err) {
     note('<span class="error">' + err.message + "</span>");
   }
+});
+
+$("strategy").addEventListener("change", () => {
+  // The window is chosen when the session starts. A new choice needs a new
+  // session, otherwise the turns already sent stay under the old strategy.
+  freshSession();
 });
 
 $("user").addEventListener("change", async () => {

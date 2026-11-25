@@ -35,13 +35,27 @@ from src.config import (
 from src.embedder import embed
 
 # Slots that name a standing fact. A booking day is not one of them.
+# A personal line that fits neither slot (a name, a colour, a badge) is
+# stored as its own note instead, so it does not have to borrow a slot.
 FACT_KEYS = ("location", "asset_id")
+NOTE_KEY = "note"
+
+# One note per sentence. "My badge number is 4412" must not replace
+# "My laptop bag is blue", and neither must replace the laptop id.
+# location and asset_id stay one active value each: a new office replaces
+# the old office.
+_SINGLE_VALUE_KEYS = FACT_KEYS
 
 # How a slot is phrased when it is embedded and when it is read back.
 FACT_LABELS = {
     "location": "office",
     "asset_id": "laptop",
+    "note": "note",
 }
+
+# asset_id is a laptop id such as LAP-T14G3. A badge number is digits only,
+# and qwen2.5:3b parks that in asset_id. It is not a laptop.
+_ASSET_ID = re.compile(r"^LAP-[A-Z0-9]+$", re.IGNORECASE)
 
 # A greeting, thanks, or a short acknowledgement. None of these states a fact.
 _SMALL_TALK = re.compile(
@@ -71,26 +85,78 @@ class SemanticMemory:
     def extract(self, user: str, text: str, slots: dict, turn: int) -> list[dict]:
         """Write one record per stated fact. Returns the records written.
 
-        A small-talk turn writes nothing, and so does a turn that states no
-        fact slot. Stating a new value for a key supersedes the old one.
+        A small-talk turn writes nothing. location and asset_id are written
+        from the slots. asset_id is written only when it is a laptop id
+        (LAP-...), so a badge number the model parked there is not stored
+        as the laptop. Anything else the user stated on this turn is one
+        note, kept beside the slots rather than forced into one of them.
+        A new office replaces the old office. A new note does not.
         """
         if self.is_small_talk(text):
             return []
 
+        slots = slots if isinstance(slots, dict) else {}
         written = []
         for key in FACT_KEYS:
-            value = slots.get(key) if isinstance(slots, dict) else None
+            value = slots.get(key)
             if not isinstance(value, str) or not value.strip():
                 continue
+            if key == "asset_id" and not _ASSET_ID.match(value.strip()):
+                continue
             written.append(self.remember(user, key, value.strip(), turn))
+
+        note = text.strip()
+        if note and not self._covered_by_slots(note, slots):
+            written.append(self.remember(user, NOTE_KEY, note, turn))
         return written
 
+    def _covered_by_slots(self, text: str, slots: dict) -> bool:
+        """True when the sentence only restates the office or the laptop id.
+
+        "I sit at the Pune office" with location "Pune office" is that
+        fact, so it is not also stored as a note. "My laptop bag is blue"
+        slots nothing, so it is a note. "My badge number is 4412" may have
+        been slotted as asset_id, but that slot was rejected, so it is a
+        note too. "Thanks, have a good day!" states neither, and is not a
+        fact just because the model called it provide_info.
+        """
+        lowered = text.lower()
+        covered = False
+        for key in FACT_KEYS:
+            value = slots.get(key)
+            if key == "asset_id" and isinstance(value, str) and not _ASSET_ID.match(value.strip()):
+                value = None
+            if isinstance(value, str) and value.strip() and value.strip().lower() in lowered:
+                covered = True
+        if covered:
+            return True
+        # A personal line names whose fact it is, and states something
+        # beyond the office or the laptop. "I sit at the Pune office" is
+        # already covered above. "Thanks" names nothing.
+        if re.search(r"\b(my|i'm|i am|i've|mine)\b", lowered):
+            return False
+        if re.search(r"\bi\b", lowered) and re.search(
+            r"\b(name|bag|badge|colour|color|manager|phone|number)\b", lowered
+        ):
+            return False
+        return True
+
     def remember(self, user: str, key: str, value: str, turn: int | None) -> dict:
-        """Append one active fact, superseding this user's previous value."""
-        current = self._latest(user)
-        previous = current.get(key)
-        if previous is not None and previous["value"] == value and previous["status"] == "active":
-            return previous
+        """Append one active fact.
+
+        location and asset_id supersede this user's previous value, so
+        there is one office and one laptop. A note does not: each sentence
+        stays active, and an identical sentence is not written twice.
+        """
+        if key in _SINGLE_VALUE_KEYS:
+            previous = self._latest(user).get(key)
+            if previous is not None and previous["value"] == value and previous["status"] == "active":
+                return previous
+        else:
+            previous = None
+            for row in self.active(user):
+                if row["key"] == key and row["value"] == value:
+                    return row
 
         record = {
             "id": self._next_id(),
@@ -112,21 +178,32 @@ class SemanticMemory:
         return record
 
     def active(self, user: str) -> list[dict]:
-        """This user's active facts, one per key."""
-        return [
-            row for row in self._latest(user).values() if row["status"] == "active"
-        ]
+        """This user's active facts.
+
+        location and asset_id contribute their latest line only. Every
+        active note is kept, because each one is a different sentence.
+        """
+        found = []
+        for row in self._read():
+            if row["user"] != user or row["status"] != "active":
+                continue
+            if row["key"] in _SINGLE_VALUE_KEYS:
+                continue
+            found.append(row)
+        for row in self._latest(user).values():
+            if row["status"] == "active" and row["key"] in _SINGLE_VALUE_KEYS:
+                found.append(row)
+        return found
 
     def active_records(self) -> list[dict]:
-        """Every user's active facts. One per (user, key), latest line wins."""
+        """Every user's active facts.
+
+        location and asset_id are one row per user. Notes are one row per
+        sentence, so a colour and a badge are both in the index.
+        """
         found = []
-        seen: set[tuple[str, str]] = set()
         for user in self._users():
-            for row in self.active(user):
-                if (row["user"], row["key"]) in seen:
-                    continue
-                seen.add((row["user"], row["key"]))
-                found.append(row)
+            found.extend(self.active(user))
         return found
 
     def _latest(self, user: str) -> dict[str, dict]:
@@ -152,9 +229,17 @@ class SemanticMemory:
         The query is also rephrased in the same "office: ..." form the fact
         was embedded with. "Where do I sit?" is about an office, but those
         words are far from "office: Pune office" in the embedding space.
+        A question that names one kind of fact (the office, the laptop, or
+        a note) is not answered from a different kind.
         """
         rows = self.active(user)
         if not rows or not query.strip():
+            return []
+
+        wanted = self._wanted_key(query)
+        if wanted is not None:
+            rows = [row for row in rows if row["key"] == wanted]
+        if not rows:
             return []
 
         matrix = self._vectors_for(rows)
@@ -170,6 +255,26 @@ class SemanticMemory:
             hit["score"] = score
             found.append(hit)
         return found
+
+    def _wanted_key(self, query: str) -> str | None:
+        """Which fact key this question is about, or None to search all.
+
+        "What colour is my laptop bag?" says laptop, but it is about the
+        bag. That question searches notes, not asset_id. "Whats my asset
+        Id?" searches the laptop id only, so a note that also says laptop
+        cannot outscore it.
+        """
+        lowered = query.lower()
+        if re.search(r"\b(colour|color|bag|badge|name)\b", lowered):
+            return NOTE_KEY
+        if re.search(
+            r"\b(sit|seat|desk|office|work|location|located|based|workplace)\b",
+            lowered,
+        ):
+            return "location"
+        if re.search(r"\b(laptops?|assets?|machines?|computers?|devices?)\b", lowered):
+            return "asset_id"
+        return None
 
     def forget(self, user: str, key: str) -> int:
         """Delete this user's records for one key, file and index both.
@@ -277,6 +382,12 @@ class SemanticMemory:
             lowered,
         ):
             return f"office: {query}"
+        # "What colour is my laptop bag?" is about the bag, not the laptop
+        # id. Routing it to "laptop:" made the badge number (stored under
+        # asset_id) the answer. A colour, a bag, or a badge stays as the
+        # question, so it can match the note that stated it.
+        if re.search(r"\b(colour|color|bag|badge|name)\b", lowered):
+            return query
         if re.search(r"\b(laptops?|assets?|machines?|computers?|devices?)\b", lowered):
             return f"laptop: {query}"
         # "Where do I sit?" contains "do", which is not a manager question.

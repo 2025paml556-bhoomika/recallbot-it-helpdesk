@@ -86,6 +86,8 @@ REPLIES = {
 FACT_REPLIES = {
     "location": "You sit at {value}.",
     "asset_id": "You use {value}.",
+    # A name, a colour, or a badge was stored as the sentence itself.
+    "note": "You told me: {value}",
 }
 
 # A past event is not a standing fact. "What did we do last time?" is about
@@ -299,6 +301,9 @@ class Session:
         self.calls: list[dict] = []
         # The tool decide() ran for this turn, or None when it ran none.
         self.tool_call: dict | None = None
+        # Facts written by the latest ingest. The thanks line is only said
+        # when this is not empty, so "I'll remember that" matches a real row.
+        self.facts_written: list[dict] = []
 
     def ingest(self, text: str) -> dict:
         """Label one message and merge any new slot values into this session.
@@ -344,7 +349,7 @@ class Session:
             self._arm_reschedule()
         # A stated fact is written now, so a later session can read it. A
         # greeting, a yes, or a no writes nothing.
-        self.memory.record_turn(
+        self.facts_written = self.memory.record_turn(
             text,
             understood["intent"],
             understood["slots"],
@@ -879,6 +884,11 @@ class Session:
         # A question about the user that matched nothing stored. Same reason:
         # the model invents an office when it is asked to reword the miss.
         if intent == "recall_fact":
+            return REPLIES["recall_fact"]
+        # "I'll remember that" is only true when a row was written. A
+        # provide_info turn that stored nothing gets the refusal instead,
+        # so the bot does not claim to have kept a colour it dropped.
+        if intent == "provide_info" and not self.facts_written:
             return REPLIES["recall_fact"]
         # "ok" after a written visit is thanks. The same word with nothing
         # booked stays a short acknowledgement, not a refusal and not

@@ -1155,6 +1155,67 @@ def test_located_and_asset_id_are_recalled_end_to_end(monkeypatch, tmp_path):
     assert second.reply(asset, second.decide(asset)) == "You use LAP-T14G3."
 
 
+def test_a_colour_is_remembered_and_a_badge_does_not_become_the_laptop(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted(
+            {
+                "My name is Bhoomika.": {"intent": "provide_info", "slots": {}},
+                "My laptop bag is blue.": {"intent": "provide_info", "slots": {}},
+                "My badge number is 4412.": {
+                    "intent": "provide_info",
+                    "slots": {"asset_id": "4412"},
+                },
+                "My laptop is LAP-T14G3.": {
+                    "intent": "provide_info",
+                    "slots": {"asset_id": "LAP-T14G3"},
+                },
+                "What colour is my laptop bag?": {"intent": "recall_fact"},
+                "Whats my asset Id ?": {"intent": "recall_fact"},
+            }
+        ),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    session.ingest("My name is Bhoomika.")
+    session.ingest("My laptop bag is blue.")
+    session.ingest("My badge number is 4412.")
+    session.ingest("My laptop is LAP-T14G3.")
+    active = session.memory.semantic.active("U1")
+    assert [row["value"] for row in active if row["key"] == "asset_id"] == ["LAP-T14G3"]
+    assert "4412" not in [row["value"] for row in active if row["key"] == "asset_id"]
+
+    later = Session("U1", "B", memory=Memory("U1", "B", root=tmp_path))
+    colour = "What colour is my laptop bag?"
+    later.ingest(colour)
+    assert later.reply(colour, later.decide(colour)) == "You told me: My laptop bag is blue."
+    asset = "Whats my asset Id ?"
+    later.ingest(asset)
+    assert later.reply(asset, later.decide(asset)) == "You use LAP-T14G3."
+
+
+def test_provide_info_that_stores_nothing_does_not_claim_to_remember(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "src.agent.understand",
+        _scripted({"Thanks.": {"intent": "provide_info", "slots": {}}}),
+    )
+    monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
+    monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)
+
+    def fail_chat(*args, **kwargs):
+        raise AssertionError("a memory miss must not call the chat model")
+
+    monkeypatch.setattr("src.agent.chat", fail_chat)
+    session = Session("U1", "A", memory=Memory("U1", "A", root=tmp_path))
+    # Small talk is labelled provide_info here and writes no row.
+    text = "Thanks."
+    session.ingest(text)
+    assert session.facts_written == []
+    assert session.reply(text, session.decide(text)) == REPLIES["recall_fact"]
+
+
 def test_a_past_event_is_read_from_the_episode_log(monkeypatch, tmp_path):
     monkeypatch.setattr("src.semantic_memory.embed", _fake_embed)
     monkeypatch.setattr("src.episodic_memory.embed", _fake_embed)

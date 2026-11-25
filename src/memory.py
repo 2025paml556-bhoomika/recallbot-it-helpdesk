@@ -165,7 +165,17 @@ class Memory:
         # the user never claimed.
         remembered = dict(slots) if isinstance(slots, dict) else {}
         if intent == "book_slot":
+            # A visit place is not where the user sits, and the sentence is
+            # not a standing note either. "Monday" must not be stored.
             remembered.pop("location", None)
+            return self.semantic.extract(self.user, "", remembered, turn)
+        if intent != "provide_info":
+            # A fault report and a ticket check state no personal fact.
+            # A laptop id stated along the way is still a laptop id. The
+            # place in a fault ("on my floor") is the visit, not the office.
+            asset = remembered.get("asset_id")
+            only_asset = {"asset_id": asset} if isinstance(asset, str) else {}
+            return self.semantic.extract(self.user, "", only_asset, turn)
         return self.semantic.extract(self.user, text, remembered, turn)
 
     def remember_event(self, text: str, episode_type: str, turn: int | None = None) -> dict | None:
