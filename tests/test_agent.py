@@ -1061,9 +1061,13 @@ def test_an_open_turn_is_reworded_and_reads_the_skill_file(monkeypatch, tmp_path
     # gets the plain refusal rather than the greeting line.
     assert REPLIES["out_of_scope"] in greeting
     assert REPLIES["greeting"] not in greeting
-    assert REPLIES["provide_info"] in noted
+    # A stored fact is the fixed thanks line. It is not reworded, because
+    # the persona's "I don't know." rule was winning over the required reply.
+    assert noted == REPLIES["provide_info"]
     assert REPLIES["reject"] in declined
-    assert len(seen) == 3
+    # The stored fact returns without a model call. The refusal and the
+    # rejection are still reworded.
+    assert len(seen) == 2
     for call in seen:
         assert call["temperature"] == 0.7
         assert call["top_p"] == 0.9

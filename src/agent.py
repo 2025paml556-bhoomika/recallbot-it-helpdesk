@@ -1106,8 +1106,14 @@ class Session:
         # "I'll remember that" is only true when a row was written. A
         # provide_info turn that stored nothing gets the refusal instead,
         # so the bot does not claim to have kept a colour it dropped.
-        if intent == "provide_info" and not self.facts_written:
-            return REPLIES["recall_fact"]
+        # A turn that did store a fact returns the line as written. The
+        # persona tells the model to say "I don't know." whenever no tool
+        # result was fetched, and the model obeys that instead of the
+        # required thanks.
+        if intent == "provide_info":
+            if not self.facts_written:
+                return REPLIES["recall_fact"]
+            return REPLIES["provide_info"]
         # "ok" after a written visit is thanks. The same word with nothing
         # booked stays a short acknowledgement, not a refusal and not
         # "there is nothing waiting to book".
