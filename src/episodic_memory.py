@@ -132,6 +132,9 @@ class EpisodicMemory:
         session: str | None = None,
         importance: int | None = None,
         when: datetime | None = None,
+        turn: int | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
     ) -> dict | None:
         """Append one episode and its vector. Small talk is not stored.
 
@@ -153,15 +156,34 @@ class EpisodicMemory:
             "importance": int(importance if importance is not None else rate(text, episode_type)),
             "type": episode_type,
         }
-        vector = embed([record["text"]], log=False)[0]
+        vector = embed(
+            [record["text"]],
+            config=config,
+            user=user,
+            session=session,
+            turn=turn,
+            run_id=run_id,
+        )[0]
         record["embedding"] = [float(value) for value in vector]
         self._append(record)
         self._reindex(self._read())
         return record
 
-    def reflect(self, user: str, session: str, text: str) -> dict:
+    def reflect(
+        self,
+        user: str,
+        session: str,
+        text: str,
+        *,
+        turn: int | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> dict:
         """The note written when a session ends. Retrieved like any episode."""
-        written = self.add(user, text, "reflection", session=session)
+        written = self.add(
+            user, text, "reflection",
+            session=session, turn=turn, run_id=run_id, config=config,
+        )
         if written is None:
             raise ValueError("a reflection cannot be empty or small talk")
         return written
@@ -177,6 +199,10 @@ class EpisodicMemory:
         beta: float = EPISODIC_BETA,
         gamma: float = EPISODIC_GAMMA,
         min_score: float | None = None,
+        session: str | None = None,
+        turn: int | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
     ) -> list[dict]:
         """This user's episodes closest to the query, highest score first.
 
@@ -189,7 +215,14 @@ class EpisodicMemory:
             return []
 
         moment = now or datetime.now(timezone.utc)
-        query_vector = embed([query], log=False)[0]
+        query_vector = embed(
+            [query],
+            config=config,
+            user=user,
+            session=session,
+            turn=turn,
+            run_id=run_id,
+        )[0]
         ranked = []
         for row in rows:
             cosine = _cosine(query_vector, row["embedding"])
@@ -245,7 +278,16 @@ class EpisodicMemory:
         self._reindex(kept)
         return removed
 
-    def redact(self, user: str, value: str) -> int:
+    def redact(
+        self,
+        user: str,
+        value: str,
+        *,
+        session: str | None = None,
+        turn: int | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> int:
         """Blank the value inside this user's episodes instead of deleting them.
 
         Used when the episode should survive but the forgotten fact must not
@@ -261,7 +303,14 @@ class EpisodicMemory:
             if row["user"] == user and pattern.search(row["text"]):
                 row["text"] = pattern.sub("[forgotten]", row["text"])
                 row["redacted"] = True
-                row["embedding"] = [float(value) for value in embed([row["text"]], log=False)[0]]
+                row["embedding"] = [float(value) for value in embed(
+                    [row["text"]],
+                    config=config,
+                    user=user,
+                    session=session,
+                    turn=turn,
+                    run_id=run_id,
+                )[0]]
                 changed += 1
             rows.append(row)
         self._write(rows)

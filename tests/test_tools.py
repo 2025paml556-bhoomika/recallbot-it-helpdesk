@@ -29,21 +29,35 @@ def db_path(tmp_path):
 
 def test_search_kb_returns_hits_and_logs_zero_tokens():
     before = _log_lines()
-    hits = search_kb("What does ERR-VPN-809 mean?", user="U1", turn=1)
+    hits = search_kb(
+        "What does ERR-VPN-809 mean?",
+        user="U1",
+        session="A",
+        turn=4,
+        run_id="abl-hybrid",
+        config="hybrid",
+    )
     assert hits
     assert hits[0]["doc_id"] == "KB-VPN"
 
-    # The embedder logs its own embedding line. The tool adds exactly one more,
-    # and that line is the one with 0 tokens.
+    # The query embedding is logged with the same identity as the tool line.
+    # The tool line is the one with 0 tokens.
     added = [json.loads(line) for line in _log_lines()[len(before):]]
-    tool_lines = [row for row in added if row["call_type"] == "tool"]
-    assert len(tool_lines) == 1
-    new = tool_lines[0]
+    assert [row["call_type"] for row in added] == ["embed", "tool"]
+    embedded, new = added
+    assert embedded["user"] == "U1"
+    assert embedded["session"] == "A"
+    assert embedded["turn"] == 4
+    assert embedded["run_id"] == "abl-hybrid"
+    assert embedded["config"] == "hybrid"
+    assert embedded["input_tokens"] > 0
+    assert embedded["retrieved_tokens"] == 0
     assert new["model"] == "tool"
     assert new["tool"] == "search_kb"
     assert new["input_tokens"] == 0
     assert new["output_tokens"] == 0
     assert new["user"] == "U1"
+    assert new["run_id"] == "abl-hybrid"
 
 
 def test_get_ticket_returns_only_the_owners_row(db_path):

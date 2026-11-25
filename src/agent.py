@@ -401,6 +401,9 @@ class Session:
             text,
             semantic=self.uses["semantic"],
             episodic=self.uses["episodic"],
+            turn=self.turn,
+            run_id=self.run_id,
+            config=self._config_name(),
         )
         # Calls made while labelling and answering this turn. reply() writes
         # them into the session file. A new turn starts empty.
@@ -1145,7 +1148,7 @@ class Session:
         """The earlier turns this strategy shows, not the message being answered.
 
         summary also folds in the turns the window no longer quotes, so the
-        notes stay current. That is one model call, logged as "summarise".
+        notes stay current. That is one model call, logged as "summary".
         full and trim only slice the list and make no call.
         """
         if self.strategy == "summary":

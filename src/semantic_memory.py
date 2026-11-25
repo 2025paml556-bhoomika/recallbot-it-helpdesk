@@ -191,17 +191,26 @@ class SemanticMemory:
                 continue
             if key == "asset_id" and not _ASSET_ID.match(value.strip()):
                 continue
-            written.append(self.remember(user, key, value.strip(), turn))
+            written.append(self.remember(
+                user, key, value.strip(), turn,
+                session=session, run_id=run_id, config=config,
+            ))
 
         profile = profile_facts(text) if text.strip() else {}
         for key in PROFILE_KEYS:
             value = profile.get(key)
             if value:
-                written.append(self.remember(user, key, value, turn))
+                written.append(self.remember(
+                    user, key, value, turn,
+                    session=session, run_id=run_id, config=config,
+                ))
 
         note = text.strip()
         if note and not self._covered_by_slots(note, slots) and not profile:
-            written.append(self.remember(user, NOTE_KEY, note, turn))
+            written.append(self.remember(
+                user, NOTE_KEY, note, turn,
+                session=session, run_id=run_id, config=config,
+            ))
         if log:
             self._log_extract(
                 user,
@@ -274,7 +283,17 @@ class SemanticMemory:
             return False
         return True
 
-    def remember(self, user: str, key: str, value: str, turn: int | None) -> dict:
+    def remember(
+        self,
+        user: str,
+        key: str,
+        value: str,
+        turn: int | None,
+        *,
+        session: str | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> dict:
         """Append one active fact.
 
         A keyed fact supersedes this user's previous value, so there is one
@@ -307,6 +326,16 @@ class SemanticMemory:
                     row["status"] = "superseded"
         rows.append(record)
         self._write(rows)
+        # Logged once, for the new fact. The rebuild below re-embeds every
+        # active fact from the file, and that is not a new call.
+        embed(
+            [self._text(record)],
+            config=config,
+            user=user,
+            session=session,
+            turn=turn,
+            run_id=run_id,
+        )
         self._reindex(self.active_records())
         return record
 
@@ -354,7 +383,17 @@ class SemanticMemory:
                 seen.append(row["user"])
         return seen
 
-    def recall(self, user: str, query: str, top_k: int = 3) -> list[dict]:
+    def recall(
+        self,
+        user: str,
+        query: str,
+        top_k: int = 3,
+        *,
+        session: str | None = None,
+        turn: int | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> list[dict]:
         """Active facts of this user whose text is close to the query.
 
         Other users' facts are excluded before scoring. A fact below the
@@ -376,7 +415,14 @@ class SemanticMemory:
             return []
 
         matrix = self._vectors_for(rows)
-        query_vector = embed([self._query_text(query)], log=False)[0]
+        query_vector = embed(
+            [self._query_text(query)],
+            config=config,
+            user=user,
+            session=session,
+            turn=turn,
+            run_id=run_id,
+        )[0]
         scores = matrix @ query_vector
         order = np.argsort(-scores)
         found = []

@@ -106,6 +106,8 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
   - Overlap is 19/128 and 77/512 (about 15%). `data/chunks.jsonl` has both sizes.
 - [x] Store metadata with each chunk: `doc_id`, `section`, `version`, `valid_from`, `status`
 - [x] `src/embedder.py`: MiniLM with mean pooling and normalised vectors; log every embedding call
+  - A query made while answering a user is logged with that turn's `run_id`, `config`, `user`, `session` and `turn`. `tools.search_kb` passes them through `search_kb` into the embedder. A one-off search (the hit-rate script, the command line) has no session, so those fields stay null. BM25 does not embed, so it writes no embed line. Hybrid embeds the query once.
+  - Rebuilding an index from vectors already stored passes `log=False` and writes nothing. The index benchmark does the same, because its timing is the search, not the embedding.
 - [x] `src/vector_index.py`: a flat FAISS index (justify it: a small corpus needs exact search), with metadata saved to `index/`
   - `index/kb.faiss` is `IndexFlatIP`; chunk metadata is `index/kb_meta.jsonl`.
 - [x] `src/bm25.py`: my own BM25 (k1, b, IDF)
@@ -169,7 +171,7 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 ## 7. Semantic memory · Task 3(c) (1 mark) · depends on 5
 - [ ] `src/semantic_memory.py`: records `{user, key, value, source_turn, date, status}` in `memory/semantic.jsonl`, plus a vector index
 - [~] An extraction step, logged as `extract`. Small-talk turns produce no record
-  - Done: a `provide_info` turn calls `SemanticMemory.extract`, which writes the facts and appends one `extract` line (a rule, 0 tokens, `retrieved_tokens` 0). Small talk, a greeting, a booking answer and a fault report write nothing and log nothing.
+  - Done: a `provide_info` turn calls `SemanticMemory.extract`, which writes the facts and appends one `extract` line (a rule, 0 tokens, `retrieved_tokens` 0). Small talk, a greeting, a booking answer and a fault report write nothing and log nothing. A fact that is actually new is also embedded, and that call is logged as `embed` with the turn's `run_id`, `config`, `user`, `session` and `turn`. Recalling facts embeds the query and logs it the same way. Rebuilding the index from the stored vectors is not logged again.
   - Still open: the step is a rule over the planted sentence patterns, not an LLM call, and precision and recall are not measured yet.
 - [ ] Update: the old record is marked `superseded`, so only `active` records are retrieved
 - [ ] Forget: delete from the JSONL file **and** the vector index
@@ -180,6 +182,7 @@ Sections are listed in the order to **build** them, following the PDF's "Suggest
 
 ## 8. Episodic memory and reflection · Task 3(d) (1 mark) · depends on 7
 - [ ] `src/episodic_memory.py`: a stream in `memory/episodic.jsonl` with `{user, ts, text, importance 1–10, type}`
+  - A new episode and a reflection are embedded once and logged as `embed` with the turn's identity. Recalling episodes logs the query embedding the same way. Redacting a forgotten value re-embeds the blanked text and logs that too. Rebuilding the index copies the stored vectors and logs nothing.
 - [ ] Importance from a rule or an LLM (logged as `importance`). Explain the choice
 - [ ] Score = α·recency (exponential decay, e.g. 0.995 per hour) + β·importance + γ·cosine similarity, written myself
 - [ ] Compare 2 weightings on the past-event probes and justify the one I keep

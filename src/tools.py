@@ -80,7 +80,17 @@ def search_kb(
     with 0 tokens after the search succeeds.
     """
     start = time.time()
-    hits = search_kb_index(query, mode=mode, top_k=top_k, size=size)
+    hits = search_kb_index(
+        query,
+        mode=mode,
+        top_k=top_k,
+        size=size,
+        config=config,
+        user=user,
+        session=session,
+        turn=turn,
+        run_id=run_id,
+    )
     _log_tool(
         "search_kb",
         start,

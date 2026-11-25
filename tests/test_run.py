@@ -125,7 +125,7 @@ def test_episodes_are_read_only_by_hybrid_mem(tmp_path, monkeypatch):
     # would be dropped for every config. This checks the gate, not the rank.
     monkeypatch.setattr(
         "src.episodic_memory.EpisodicMemory.recall",
-        lambda self, user, query: [{"id": "ep-0001", "text": "Booked a visit on Thursday at 4 pm.", "type": "booking"}],
+        lambda self, user, query, **kwargs: [{"id": "ep-0001", "text": "Booked a visit on Thursday at 4 pm.", "type": "booking"}],
     )
     question = "What did I book last time?"
 

@@ -153,7 +153,16 @@ class Memory:
         sessions_root = None if root is None else Path(root) / "sessions"
         self.conversation = ConversationLog(user, session, sessions_root)
 
-    def load(self, text: str, *, semantic: bool = True, episodic: bool = True) -> dict:
+    def load(
+        self,
+        text: str,
+        *,
+        semantic: bool = True,
+        episodic: bool = True,
+        turn: int | None = None,
+        run_id: str | None = None,
+        config: str | None = None,
+    ) -> dict:
         """The memories relevant to this message.
 
         Returns {"summary", "facts", "episodes"}. facts are the user's active
@@ -164,10 +173,13 @@ class Memory:
         turns one off at a time: no_rag reads neither, hybrid_sem reads facts
         but not episodes. What was written stays written either way.
         """
+        identity = dict(
+            session=self.session, turn=turn, run_id=run_id, config=config,
+        )
         return {
             "summary": self.working.summary,
-            "facts": self.semantic.recall(self.user, text) if semantic else [],
-            "episodes": self.episodic.recall(self.user, text) if episodic else [],
+            "facts": self.semantic.recall(self.user, text, **identity) if semantic else [],
+            "episodes": self.episodic.recall(self.user, text, **identity) if episodic else [],
         }
 
     def forget_request(self, key: str, value: str | None) -> dict:
@@ -260,6 +272,9 @@ class Memory:
             episode_type,
             session=self.session,
             importance=importance,
+            turn=turn,
+            run_id=run_id,
+            config=config,
         )
         if written is not None:
             self._log_importance(written, turn, run_id=run_id, config=config)
@@ -355,7 +370,14 @@ class Memory:
                 run_id=run_id,
                 config=config,
             )
-        written = self.episodic.reflect(self.user, self.session, reflection)
+        written = self.episodic.reflect(
+            self.user,
+            self.session,
+            reflection,
+            turn=turn,
+            run_id=run_id,
+            config=config,
+        )
         self._log_importance(written, turn, run_id=run_id, config=config)
         return written
 

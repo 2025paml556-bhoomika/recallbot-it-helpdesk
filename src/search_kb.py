@@ -76,9 +76,24 @@ def search_dense(
     query: str,
     top_k: int = 5,
     size: int | None = None,
+    *,
+    config: str | None = None,
+    user: str | None = None,
+    session: str | None = None,
+    turn: int | None = None,
+    run_id: str | None = None,
 ) -> list[dict]:
     """Nearest chunks by cosine similarity. Scores lie in [-1, 1]."""
-    hits = dense_search(query, top_k=top_k, size=size)
+    hits = dense_search(
+        query,
+        top_k=top_k,
+        size=size,
+        config=config,
+        user=user,
+        session=session,
+        turn=turn,
+        run_id=run_id,
+    )
     return [_hit(row, rank, row["score"], "dense") for rank, row in enumerate(hits, start=1)]
 
 
@@ -99,6 +114,12 @@ def search_hybrid(
     top_k: int = 5,
     size: int | None = None,
     meta: list[dict] | None = None,
+    *,
+    config: str | None = None,
+    user: str | None = None,
+    session: str | None = None,
+    turn: int | None = None,
+    run_id: str | None = None,
 ) -> list[dict]:
     """Fuse the dense ranking and the BM25 ranking with RRF, k=60.
 
@@ -113,7 +134,16 @@ def search_hybrid(
 
     dense_ids = [
         row["chunk_id"]
-        for row in search_dense(query, top_k=FUSE_DEPTH, size=size)
+        for row in search_dense(
+            query,
+            top_k=FUSE_DEPTH,
+            size=size,
+            config=config,
+            user=user,
+            session=session,
+            turn=turn,
+            run_id=run_id,
+        )
         if row["chunk_id"] in by_id
     ]
     bm25, bm25_rows = bm25_index(size, meta)
@@ -131,12 +161,21 @@ def search_kb(
     mode: str = "hybrid",
     top_k: int = 5,
     size: int | None = None,
+    *,
+    config: str | None = None,
+    user: str | None = None,
+    session: str | None = None,
+    turn: int | None = None,
+    run_id: str | None = None,
 ) -> list[dict]:
     """Top-k chunks for one query.
 
     mode is "dense", "bm25" or "hybrid". size is 128 or 512; omit it to
     search every stored chunk. Each hit has rank, score, mode, chunk_id and
     doc_id.
+
+    The identity fields are forwarded to the embedding call. BM25 never
+    embeds, so a bm25 search writes no embed line. Hybrid embeds once.
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
@@ -147,11 +186,14 @@ def search_kb(
             f"no index at {META_PATH}; build it with python -m src.vector_index"
         )
 
+    identity = dict(
+        config=config, user=user, session=session, turn=turn, run_id=run_id,
+    )
     if mode == "dense":
-        return search_dense(query, top_k=top_k, size=size)
+        return search_dense(query, top_k=top_k, size=size, **identity)
     if mode == "bm25":
         return search_bm25(query, top_k=top_k, size=size)
-    return search_hybrid(query, top_k=top_k, size=size)
+    return search_hybrid(query, top_k=top_k, size=size, **identity)
 
 
 def main() -> None:

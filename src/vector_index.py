@@ -93,12 +93,21 @@ def search(
     index: faiss.Index | None = None,
     meta: list[dict] | None = None,
     size: int | None = None,
+    config: str | None = None,
+    user: str | None = None,
+    session: str | None = None,
+    turn: int | None = None,
+    run_id: str | None = None,
 ) -> list[dict]:
     """The nearest chunks to a query, best first.
 
     `size` keeps only the chunks cut at that many tokens, so the 128 and the
     512 indexes can be compared from the one file. Scores are cosine
     similarities, because the stored vectors are normalised.
+
+    The identity fields are written on the embedding log line. A search made
+    while answering a user has a run, a config and a turn; a one-off search
+    from the command line has none, and those fields stay null.
     """
     if index is None or meta is None:
         index, meta = load()
@@ -109,7 +118,14 @@ def search(
     if not positions or top_k <= 0:
         return []
 
-    query_vector = embed([query])
+    query_vector = embed(
+        [query],
+        config=config,
+        user=user,
+        session=session,
+        turn=turn,
+        run_id=run_id,
+    )
     scores, ids = index.search(np.ascontiguousarray(query_vector, dtype=np.float32), index.ntotal)
 
     allowed = set(positions)

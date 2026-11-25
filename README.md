@@ -86,6 +86,10 @@ Prints the vector count after one year (knowledge-base chunks plus 100,000 users
 
 ## Logging
 
-`src.logger.log_call()` only appends. Each successful LLM call adds one JSON line with `ts`, `run_id`, `config`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens` and `latency_ms`. Token counts are the API's `prompt_eval_count` and `eval_count`. A failed call writes nothing.
+`src.logger.log_call()` only appends. Each successful LLM, embedding or tool call adds one JSON line with `ts`, `run_id`, `config`, `user`, `session`, `turn`, `call_type`, `model`, `input_tokens`, `output_tokens`, `retrieved_tokens` and `latency_ms`. Token counts are the API's `prompt_eval_count` and `eval_count`. A failed call writes nothing. Embeddings of new queries, facts and episodes are logged with the user, session and turn they belong to. Rebuilding an index from text that was already embedded is not logged again.
 
-A new line uses `call_type` `chat`, `nlu`, `embed`, `tool`, `summary`, `extract`, `importance`, `reflect` or `judge`. The older names `reply`, `summarise` and `embedding` are no longer written. Lines already in the file keep the name they were written with, and are not edited. `config` on a new line is one of `full`, `trim`, `summary`, `no_rag`, `hybrid`, `hybrid_sem`, `hybrid_mem`. A line from before this field was filled in has `config` null.
+The test suite never writes to `logs/calls.jsonl`: `tests/conftest.py` sends every log line to a temporary file, and fails the run if the real log grows.
+
+A new line uses `call_type` `chat`, `nlu`, `embed`, `tool`, `summary`, `extract`, `importance`, `reflect` or `judge`. The older names `reply`, `summarise` and `embedding` are refused. `config` is one of `full`, `trim`, `summary`, `no_rag`, `hybrid`, `hybrid_sem`, `hybrid_mem`.
+
+`logs/calls.jsonl` is git-ignored and is not in the repository. The first logged call creates it, so a fresh clone starts with an empty log and the runs fill it.

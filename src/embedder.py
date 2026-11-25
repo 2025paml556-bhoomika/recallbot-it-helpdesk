@@ -43,6 +43,7 @@ def embed(
     user: str | None = None,
     session: str | None = None,
     turn: int | None = None,
+    run_id: str | None = None,
     log: bool = True,
 ) -> np.ndarray:
     """Return one normalised vector per text, shape (len(texts), EMBED_DIM).
@@ -70,8 +71,10 @@ def embed(
     vectors = np.asarray(vectors, dtype=np.float32)
 
     # Log only after the call succeeds, so a failure leaves no line. A caller
-    # that is re-embedding stored memory passes log=False: that work was
-    # already logged when the vector was first computed.
+    # that is rebuilding an index from vectors already stored passes
+    # log=False: that work was logged when the text was first embedded.
+    # A new query, a new fact and a new episode log, and they pass the
+    # session they belong to so the line is not anonymous.
     if not log:
         return vectors
     log_call(
@@ -84,6 +87,7 @@ def embed(
         user=user,
         session=session,
         turn=turn,
+        run_id=run_id,
         extra={"n_texts": len(texts)},
     )
     return vectors

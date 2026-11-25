@@ -492,7 +492,11 @@ def test_the_same_fault_is_not_raised_twice(monkeypatch, tmp_path):
     second = session.decide(text)
     assert second == {"action": ACTION_NONE}
     assert len(_rows(db_path, "tickets")) == 1
-    assert _log_len() == before
+    # No second ticket, so no second tool line. Recalling the repeated
+    # sentence still embeds the query.
+    added = [json.loads(line) for line in _log_lines()[before:]]
+    assert [row["call_type"] for row in added] == ["embed"]
+    assert "search_kb" not in {row.get("tool") for row in added}
 
 
 def test_booking_asks_for_the_first_missing_slot_and_writes_nothing(monkeypatch, tmp_path):
@@ -778,14 +782,22 @@ def test_provide_info_logs_the_extraction_and_a_greeting_calls_nothing(monkeypat
     assert session.slots["location"] == "Pune office"
     assert _rows(db_path, "tickets") == []
     assert _rows(db_path, "slots") == []
-    # The greeting ran nothing. Stating the office is an extraction, which
-    # is logged as its own line and is not a tool call.
+    # The greeting ran nothing. Stating the office logs the new fact's
+    # embedding and the extraction. Recalling memory for the second turn
+    # embeds the query. Neither line is a tool call.
     added = [json.loads(line) for line in _log_lines()[before:]]
-    assert [row["call_type"] for row in added] == ["extract"]
-    assert added[0]["user"] == "U1"
-    assert added[0]["turn"] == 1
-    assert added[0]["retrieved_tokens"] == 0
-    assert "location" in added[0]["keys"]
+    assert [row["call_type"] for row in added] == ["embed", "extract", "embed"]
+    fact, extract, query = added
+    assert fact["user"] == "U1" and fact["session"] == "A" and fact["turn"] == 1
+    # No ablation run was named, so the line keeps the process run id.
+    assert fact["run_id"]
+    assert extract["call_type"] == "extract"
+    assert extract["user"] == "U1"
+    assert extract["turn"] == 1
+    assert extract["retrieved_tokens"] == 0
+    assert "location" in extract["keys"]
+    assert query["turn"] == 2
+    assert query["user"] == "U1" and query["session"] == "A"
 
 
 def _scripted_chat(replies: dict[str, str]):
@@ -1328,11 +1340,30 @@ def _fake_embed(texts, **kwargs):
     Each text becomes a unit vector with one axis per character it contains.
     The width matches the real model, because the stored index is built at
     that width. Two texts about the same place then point the same way.
+    A logged call writes the embed line, so the log tests see it.
     """
+    import time
+
     import numpy as np
 
     from src.config import EMBED_DIM
 
+    if kwargs.get("log", True):
+        from src.logger import log_call
+
+        log_call(
+            call_type="embed",
+            model="test-embed",
+            input_tokens=len(texts),
+            output_tokens=0,
+            start=time.time(),
+            config=kwargs.get("config"),
+            user=kwargs.get("user"),
+            session=kwargs.get("session"),
+            turn=kwargs.get("turn"),
+            run_id=kwargs.get("run_id"),
+            extra={"n_texts": len(texts)},
+        )
     rows = []
     for text in texts:
         vector = np.zeros(EMBED_DIM, dtype=np.float32)

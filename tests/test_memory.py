@@ -17,7 +17,30 @@ from src.semantic_memory import SemanticMemory
 
 
 def _fake_embed(texts, **kwargs):
-    """One axis per character, so texts about the same thing point together."""
+    """One axis per character, so texts about the same thing point together.
+
+    log=False is a rebuild from vectors already stored, and writes nothing.
+    Anything else writes the embed line the real embedder would, so a test
+    can check that a new fact or a query was logged.
+    """
+    if kwargs.get("log", True):
+        import time
+
+        from src.logger import log_call
+
+        log_call(
+            call_type="embed",
+            model="test-embed",
+            input_tokens=len(texts),
+            output_tokens=0,
+            start=time.time(),
+            config=kwargs.get("config"),
+            user=kwargs.get("user"),
+            session=kwargs.get("session"),
+            turn=kwargs.get("turn"),
+            run_id=kwargs.get("run_id"),
+            extra={"n_texts": len(texts)},
+        )
     width = EMBED_DIM
     rows = []
     for text in texts:
@@ -36,7 +59,11 @@ def _stub_embed(monkeypatch):
 
 
 def test_extracting_a_fact_is_logged_and_small_talk_is_not(tmp_path, monkeypatch):
-    """call_type "extract" is written once per extraction, never for small talk."""
+    """call_type "extract" is written once per extraction, never for small talk.
+
+    Storing the fact also logs its embedding. Recalling it logs the query
+    embedding. Rebuilding the index from stored vectors logs nothing more.
+    """
     import json
 
     import src.logger as logger
@@ -51,23 +78,48 @@ def test_extracting_a_fact_is_logged_and_small_talk_is_not(tmp_path, monkeypatch
         {"location": "Pune office"},
         turn=2,
         session="A",
+        run_id="abl-hybrid_sem",
         config="hybrid_sem",
     )
     assert written
     assert store.extract("U1", "Thanks!", {}, turn=3, session="A", config="hybrid_sem") == []
+    # The same fact is already active, so it is not embedded again. The
+    # extraction itself is still logged: the turn was examined.
+    again = store.extract(
+        "U1",
+        "I sit at the Pune office.",
+        {"location": "Pune office"},
+        turn=4,
+        session="A",
+        config="hybrid_sem",
+    )
+    assert again[0]["id"] == written[0]["id"]
+    found = store.recall(
+        "U1", "Where do I sit?",
+        session="B", turn=1, run_id="abl-hybrid_sem", config="hybrid_sem",
+    )
+    assert found
 
     lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    assert len(lines) == 1
-    assert lines[0]["call_type"] == "extract"
-    assert lines[0]["model"] == "rule"
-    assert lines[0]["input_tokens"] == 0
-    assert lines[0]["output_tokens"] == 0
-    assert lines[0]["retrieved_tokens"] == 0
-    assert lines[0]["user"] == "U1"
-    assert lines[0]["session"] == "A"
-    assert lines[0]["turn"] == 2
-    assert lines[0]["config"] == "hybrid_sem"
-    assert "location" in lines[0]["keys"]
+    assert [row["call_type"] for row in lines] == ["embed", "extract", "extract", "embed"]
+    stored, extracted, repeat, query = lines
+    assert repeat["call_type"] == "extract" and repeat["turn"] == 4
+    assert repeat["keys"] == ["location"]
+    assert stored["user"] == "U1" and stored["session"] == "A" and stored["turn"] == 2
+    assert stored["run_id"] == "abl-hybrid_sem" and stored["config"] == "hybrid_sem"
+    assert stored["retrieved_tokens"] == 0
+    assert query["session"] == "B" and query["turn"] == 1
+    assert query["run_id"] == "abl-hybrid_sem"
+    assert extracted["call_type"] == "extract"
+    assert extracted["model"] == "rule"
+    assert extracted["input_tokens"] == 0
+    assert extracted["output_tokens"] == 0
+    assert extracted["retrieved_tokens"] == 0
+    assert extracted["user"] == "U1"
+    assert extracted["session"] == "A"
+    assert extracted["turn"] == 2
+    assert extracted["config"] == "hybrid_sem"
+    assert "location" in extracted["keys"]
 
 
 def test_a_stated_fact_is_stored_and_small_talk_is_not(tmp_path):
@@ -174,6 +226,50 @@ def test_a_second_user_never_receives_the_first_users_facts(tmp_path):
 
     store.remember("U2", "location", "Mumbai", turn=5)
     assert store.active("U1")[0]["value"] == "Pune"
+
+
+def test_a_new_episode_and_a_query_are_logged_and_a_rebuild_is_not(tmp_path, monkeypatch):
+    """Embedding a new episode and a recall query writes an embed line each.
+
+    The index rebuild copies the stored vector, so it adds no third line.
+    """
+    import json
+
+    import src.logger as logger
+
+    path = tmp_path / "calls.jsonl"
+    monkeypatch.setattr(logger, "LOG_PATH", path)
+
+    store = EpisodicMemory(tmp_path / "episodes")
+    written = store.add(
+        "U1",
+        "Raised TCK-1042 for the laptop screen.",
+        "ticket",
+        session="A",
+        turn=9,
+        run_id="abl-hybrid_mem",
+        config="hybrid_mem",
+    )
+    assert written is not None
+    store._reindex(store._read())
+    found = store.recall(
+        "U1",
+        "what ticket did I raise",
+        session="B",
+        turn=2,
+        run_id="abl-hybrid_mem",
+        config="hybrid_mem",
+    )
+    assert found
+
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert [row["call_type"] for row in lines] == ["embed", "embed"]
+    stored, query = lines
+    assert stored["user"] == "U1" and stored["session"] == "A" and stored["turn"] == 9
+    assert stored["run_id"] == "abl-hybrid_mem" and stored["config"] == "hybrid_mem"
+    assert stored["retrieved_tokens"] == 0
+    assert query["session"] == "B" and query["turn"] == 2
+    assert query["run_id"] == "abl-hybrid_mem"
 
 
 def test_score_matches_the_worked_example():
