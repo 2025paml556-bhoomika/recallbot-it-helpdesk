@@ -56,6 +56,21 @@ CONFIGS = (
     "hybrid_mem",
 )
 
+# The ablation. Each one adds exactly one thing to the one before it:
+# no_rag is the short-term window alone, hybrid adds the knowledge base,
+# hybrid_sem adds the fact store, hybrid_mem adds the episode store.
+ABLATION_CONFIGS = ("no_rag", "hybrid", "hybrid_sem", "hybrid_mem")
+
+# Which memory type each ablation config may read. Writing is not gated:
+# a fact stated under no_rag is still stored, so the later config can be
+# compared against the same store. Only the read changes.
+ABLATION_USES = {
+    "no_rag": {"kb": False, "semantic": False, "episodic": False},
+    "hybrid": {"kb": True, "semantic": False, "episodic": False},
+    "hybrid_sem": {"kb": True, "semantic": True, "episodic": False},
+    "hybrid_mem": {"kb": True, "semantic": True, "episodic": True},
+}
+
 # Embeddings. all-MiniLM-L6-v2 mean-pools to 384 dimensions; embedder.py
 # L2-normalises each vector so cosine similarity is a dot product.
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"

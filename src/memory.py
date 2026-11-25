@@ -153,17 +153,21 @@ class Memory:
         sessions_root = None if root is None else Path(root) / "sessions"
         self.conversation = ConversationLog(user, session, sessions_root)
 
-    def load(self, text: str) -> dict:
+    def load(self, text: str, *, semantic: bool = True, episodic: bool = True) -> dict:
         """The memories relevant to this message.
 
         Returns {"summary", "facts", "episodes"}. facts are the user's active
         facts, episodes are the few past episodes close to the message, and
         summary is this session's notes. A new user gets three empty values.
+
+        semantic and episodic gate the read, not the store. The ablation
+        turns one off at a time: no_rag reads neither, hybrid_sem reads facts
+        but not episodes. What was written stays written either way.
         """
         return {
             "summary": self.working.summary,
-            "facts": self.semantic.recall(self.user, text),
-            "episodes": self.episodic.recall(self.user, text),
+            "facts": self.semantic.recall(self.user, text) if semantic else [],
+            "episodes": self.episodic.recall(self.user, text) if episodic else [],
         }
 
     def forget_request(self, key: str, value: str | None) -> dict:

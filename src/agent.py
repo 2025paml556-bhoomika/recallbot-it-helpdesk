@@ -116,7 +116,7 @@ _PAST_EVENT = re.compile(
 # system_prompt_v1.md is the persona. book_slot_steps_v1.md is how a visit
 # is gathered; it is included only while a booking is in progress, because
 # a password question has no use for it.
-from src.config import ROOT
+from src.config import ABLATION_USES, ROOT
 
 SKILLS_DIR = ROOT / "skills"
 SYSTEM_PROMPT_PATH = SKILLS_DIR / "system_prompt_v1.md"
@@ -331,13 +331,27 @@ class Session:
     later session, starts empty and cannot read these.
     """
 
-    def __init__(self, user: str, session: str, db_path=None, memory=None, strategy: str = "full") -> None:
+    def __init__(
+        self,
+        user: str,
+        session: str,
+        db_path=None,
+        memory=None,
+        strategy: str = "full",
+        config: str | None = None,
+    ) -> None:
         if strategy not in STRATEGIES:
             raise ValueError(f"strategy must be one of {STRATEGIES}, got {strategy!r}")
+        if config is not None and config not in ABLATION_USES:
+            raise ValueError(f"config must be one of {tuple(ABLATION_USES)}, got {config!r}")
         self.user = user
         self.session = session
         # Which earlier turns a reply is shown. The slot store is not trimmed.
         self.strategy = strategy
+        # Which memory types this run may read. None means all of them, which
+        # is how the page and the tests behave. An ablation run names one.
+        self.config = config
+        self.uses = ABLATION_USES.get(config, {"kb": True, "semantic": True, "episodic": True})
         # None logs under the process RUN_ID. A strategy run passes its own.
         self.run_id: str | None = None
         self.turn = 0
@@ -383,7 +397,11 @@ class Session:
         # Loaded before the sentence is labelled, because a later session
         # answers from what earlier sessions stored. The label itself still
         # comes from the sentence alone.
-        self.recalled = self.memory.load(text)
+        self.recalled = self.memory.load(
+            text,
+            semantic=self.uses["semantic"],
+            episodic=self.uses["episodic"],
+        )
         # Calls made while labelling and answering this turn. reply() writes
         # them into the session file. A new turn starts empty.
         self.calls = []
@@ -421,7 +439,7 @@ class Session:
             trace=self.calls,
             pending_question=self._pending_question(),
             run_id=self.run_id,
-            config=self.strategy,
+            config=self._config_name(),
         )
         self._merge(understood["intent"], understood["slots"])
         snapshot = {
@@ -476,8 +494,16 @@ class Session:
             "event",
             self.turn,
             run_id=self.run_id,
-            config=self.strategy,
+            config=self._config_name(),
         )
+
+    def _config_name(self) -> str:
+        """The name written on this turn's log lines.
+
+        An ablation run names its config, so the four runs can be split apart
+        in the log. Anything else logs the history strategy, as before.
+        """
+        return self.config or self.strategy
 
     def slots_so_far(self) -> dict[str, str | None]:
         """A copy of the carried slots. Callers cannot mutate the session."""
@@ -516,7 +542,7 @@ class Session:
             return
         found = latest_booking(
             self.user,
-            config=self.strategy,
+            config=self._config_name(),
             session=self.session,
             turn=self.turn,
             run_id=self.run_id,
@@ -631,11 +657,15 @@ class Session:
                 self._filled_open_booking_slot() or self.awaiting_confirmation
             ):
                 return self._advance_booking()
+            # no_rag answers from the conversation alone. The index is not
+            # searched, and the reply falls back rather than guessing.
+            if not self.uses["kb"]:
+                return {"action": ACTION_NONE}
             return self._tool(
                 "search_kb",
                 search_kb(
                     text,
-                    config=self.strategy,
+                    config=self._config_name(),
                     user=self.user,
                     session=self.session,
                     turn=self.turn,
@@ -679,6 +709,10 @@ class Session:
             # and not in the ticket table. "What did we do last time?" is
             # often labelled out_of_scope, so the wording is checked too.
             if self._asks_for_episode(text):
+                # Episodes are off until hybrid_mem. The question is then a
+                # miss, which is the point of the earlier configurations.
+                if not self.uses["episodic"]:
+                    return {"action": ACTION_NONE}
                 episode = self._episode_for(text)
                 if episode is None:
                     return {"action": ACTION_NONE}
@@ -689,6 +723,10 @@ class Session:
                 )
             # Answered from memory, not from the knowledge base. A question
             # states no new fact, so nothing is written on this turn either.
+            # Facts are off for no_rag and hybrid. hybrid_sem is the first
+            # configuration that may answer from the fact store.
+            if not self.uses["semantic"]:
+                return {"action": ACTION_NONE}
             fact = self._fact_for(text)
             if fact is None:
                 return {"action": ACTION_NONE}
@@ -709,7 +747,7 @@ class Session:
                         location=self.slots["location"],
                         date=self.slots["date"],
                         time_of_day=self.slots["time"],
-                        config=self.strategy,
+                        config=self._config_name(),
                         session=self.session,
                         turn=self.turn,
                         run_id=self.run_id,
@@ -726,7 +764,7 @@ class Session:
                         confirmed=True,
                         ticket_id=self.slots.get("ticket_id"),
                         asset_id=self.slots.get("asset_id"),
-                        config=self.strategy,
+                        config=self._config_name(),
                         session=self.session,
                         turn=self.turn,
                         run_id=self.run_id,
@@ -744,7 +782,7 @@ class Session:
                     "booking",
                     self.turn,
                     run_id=self.run_id,
-                    config=self.strategy,
+                    config=self._config_name(),
                 )
                 return self._tool(
                     tool_name,
@@ -778,7 +816,7 @@ class Session:
         if _LAST_BOOKING.search(text):
             found = latest_booking(
                 self.user,
-                config=self.strategy,
+                config=self._config_name(),
                 session=self.session,
                 turn=self.turn,
                 run_id=self.run_id,
@@ -790,7 +828,7 @@ class Session:
         if not ticket_id and _LAST_TICKET.search(text):
             found = latest_ticket(
                 self.user,
-                config=self.strategy,
+                config=self._config_name(),
                 session=self.session,
                 turn=self.turn,
                 run_id=self.run_id,
@@ -807,7 +845,7 @@ class Session:
         found = get_ticket(
             ticket_id,
             self.user,
-            config=self.strategy,
+            config=self._config_name(),
             session=self.session,
             turn=self.turn,
             run_id=self.run_id,
@@ -856,7 +894,7 @@ class Session:
             self.user,
             issue,
             asset_id=self.slots.get("asset_id"),
-            config=self.strategy,
+            config=self._config_name(),
             session=self.session,
             turn=self.turn,
             run_id=self.run_id,
@@ -868,7 +906,7 @@ class Session:
             "ticket",
             self.turn,
             run_id=self.run_id,
-            config=self.strategy,
+            config=self._config_name(),
         )
         return ticket
 
@@ -1000,8 +1038,8 @@ class Session:
         built = assemble(
             system=reply_system(booking=booking),
             tool_result=shown,
-            facts=self.recalled.get("facts"),
-            episodes=self.recalled.get("episodes"),
+            facts=self.recalled.get("facts") if self.uses["semantic"] else None,
+            episodes=self.recalled.get("episodes") if self.uses["episodic"] else None,
             history=self._history_block(),
             chunks=kept if name == "search_kb" else None,
             current=text,
@@ -1013,7 +1051,7 @@ class Session:
             system=reply_system(booking=booking),
             temperature=TASK_TEMPERATURE,
             call_type="chat",
-            config=self.strategy,
+            config=self._config_name(),
             user=self.user,
             session=self.session,
             turn=self.turn,
@@ -1091,7 +1129,7 @@ class Session:
             temperature=OPEN_TEMPERATURE,
             top_p=OPEN_TOP_P,
             call_type="chat",
-            config=self.strategy,
+            config=self._config_name(),
             user=self.user,
             session=self.session,
             turn=self.turn,
@@ -1123,7 +1161,7 @@ class Session:
                     turn=self.turn,
                     trace=self.calls,
                     run_id=self.run_id,
-                    config=self.strategy,
+                    config=self._config_name(),
                 )
         return window_text(self.history, self.strategy, self.memory.working.summary)
 
@@ -1234,7 +1272,7 @@ class Session:
             turn=self.turn,
             trace=self.calls,
             run_id=self.run_id,
-            config=self.strategy,
+            config=self._config_name(),
         )
 
 
