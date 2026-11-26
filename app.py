@@ -1,9 +1,9 @@
 """Small command line front for the knowledge base tools.
 
-    .venv/bin/python app.py chunk                 # chunk every document
-    .venv/bin/python app.py chunk sla.md          # chunk one document and print it
-    .venv/bin/python app.py chunk sla.md --size 128
-    .venv/bin/python app.py embed                 # embed three strings and print the shape
+    uv run app.py chunk                 # chunk every document
+    uv run app.py chunk sla.md          # chunk one document and print it
+    uv run app.py chunk sla.md --size 128
+    uv run app.py embed                 # embed three strings and print the shape
 """
 
 from __future__ import annotations

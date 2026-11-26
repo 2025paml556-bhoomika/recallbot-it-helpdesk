@@ -1,0 +1,28 @@
+[project]
+name = "recallbot-it-helpdesk"
+version = "0.6.0"
+description = "RecallBot V06: corporate IT helpdesk bot (PCA MZG517 Mini Project 1, twist A: multi-user isolation)."
+readme = "README.md"
+# numpy 1.26.4 has no wheels for Python 3.13, so the upper bound is deliberate.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "sentence-transformers==3.3.1",
+    "faiss-cpu==1.9.0.post1",
+    "numpy==1.26.4",
+    "pandas==2.2.3",
+    "matplotlib==3.9.2",
+    "transformers==4.46.3",
+    "requests==2.32.3",
+    "ollama==0.4.4",
+    "tokenizers==0.20.3",
+    "huggingface-hub==0.26.5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+]
+
+[tool.uv]
+# `src/` is run with `python -m src.<module>`; it is not an installable package.
+package = false

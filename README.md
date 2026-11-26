@@ -8,13 +8,20 @@ Corporate IT helpdesk bot for PCA MZG517 Mini Project 1 (variant V06, twist A: m
 
 ## Setup
 
-Python 3.10 or later.
+The project is managed with [uv](https://docs.astral.sh/uv/). Python 3.11 or 3.12 is required (`.python-version` pins 3.12, and uv downloads it if it is missing). Dependencies are declared in `pyproject.toml` and locked in `uv.lock`.
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
+
+That creates `.venv/` and installs the exact locked versions, including the `dev` group (pytest). Run any command through uv so it uses that environment without activating it:
+
+```bash
+uv run pytest
+uv run python -m src.llm_smoke
+```
+
+To change dependencies use `uv add <pkg>` / `uv remove <pkg>` (add `--dev` for test-only tools), then commit `pyproject.toml` and `uv.lock`. `requirements.txt` is kept only for tools that need it; `uv.lock` is the source of truth.
 
 Ollama must be running with the chosen model pulled once:
 
