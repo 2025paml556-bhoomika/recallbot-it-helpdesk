@@ -1,253 +1,873 @@
 {
-  "description": "Scripted IT helpdesk conversation for variant V06. Session A is turns 1-25, Session B is turns 26 onward. Two users share one deployment: U1 is Meera Iyer, U2 is Arjun Shah. Turns are user turns only; the bot's replies are not scripted.",
+  "description": "Scripted IT helpdesk conversation for variant V06. Session A is turns 1-25, Session B is turns 26 onward (26-60). Two users share one deployment: U1 is Meera Iyer, U2 is Arjun Shah. Turns are user turns only; the bot's replies are not scripted.",
   "users": {
     "U1": {"name": "Meera Iyer", "employee_id": "E-10428"},
     "U2": {"name": "Arjun Shah", "employee_id": "E-11007"}
   },
+  "_comment": "A key starting with an underscore is a note for the reader and is ignored by every script. The session boundary is at turn 26; see the _comment on that turn.",
   "sessions": [
     {"session": "A", "turns": "1-25"},
-    {"session": "B", "turns": "26-42"}
+    {"session": "B", "turns": "26-60"}
   ],
+  "expect_schema": {
+    "about": "What the bot should do on each turn, written from the intended behaviour and not from what any run produced. A key that is absent makes no claim. A value given as a list means any one of the entries is acceptable. Text matching is case-insensitive.",
+    "also_checked": "Besides expect, the facts, updates, forgets and events on a turn are checked too: a fact is stored for that user, an update supersedes the old value, a forgotten value is gone from facts, episodes and notes, an event is stored as an episode, and nothing one user states is readable by the other.",
+    "intent": "NLU label for the turn: one of the nine NLU intents, or 'forget' (set by the agent).",
+    "action": "What decide() returns: ask, tool or none.",
+    "tool": "Tool name when action is tool: search_kb, recall_fact, recall_episode, get_booking, get_ticket, book_it_slot, update_slot.",
+    "ask_slot": "When action is ask: the slot being asked for (location, date, time), or null for the confirmation question.",
+    "reply_contains": "Every entry must appear in the reply. An entry that is a list needs at least one of its words.",
+    "reply_not_contains": "None of these may appear in the reply.",
+    "reply_is_unknown": "true: the reply says it does not know or has no record (any wording). false: it must not.",
+    "citation": "Where the reply is grounded: a KB doc id or doc@version, 'mem' for a stored memory, or 'none'.",
+    "session_slots": "Dialogue slots held after the turn. A value matches when every word of it is in the actual value (third = 3rd).",
+    "state": "pending_booking and awaiting_confirmation flags after the turn.",
+    "facts_written": "Exact number of facts the turn stores. Used on turns that must store nothing.",
+    "db": "Cumulative row counts after the turn: tickets, and bookings (rows of the slots table). Omitted means unchanged from the last turn that gave it.",
+    "db_rows": "Rows that must exist after the turn, matched on the fields given."
+  },
   "turns": [
     {
+      "_comment": "SESSION A STARTS. src/run.py builds a fresh Session for (U1, A): empty slots, empty history, turn counter at 0. memory/ and the database begin empty for this run.",
       "turn": 1, "session": "A", "user": "U1",
       "text": "Hi, I'm Meera Iyer, employee E-10428. My laptop runs Windows 11.",
       "tags": ["fact"],
-      "facts": [{"key": "os", "value": "Windows 11"}]
+      "facts": [{"key": "os", "value": "Windows 11"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]],
+        "facts_written": 1,
+        "db": {"tickets": 0, "bookings": 0}
+      }
     },
     {
       "turn": 2, "session": "A", "user": "U1",
       "text": "It's a LAP-T14G3, the older 14 inch model.",
       "tags": ["fact"],
-      "facts": [{"key": "laptop_model", "value": "LAP-T14G3"}]
+      "facts": [{"key": "laptop_model", "value": "LAP-T14G3"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 3, "session": "A", "user": "U1",
       "text": "I sit at the Pune office, on the third floor.",
       "tags": ["fact"],
-      "facts": [{"key": "office", "value": "Pune"}, {"key": "floor", "value": "3rd floor"}]
+      "facts": [{"key": "office", "value": "Pune"}, {"key": "floor", "value": "3rd floor"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 4, "session": "A", "user": "U1",
       "text": "I work in the finance department, and my manager is Rohan Deshpande.",
       "tags": ["fact"],
-      "facts": [{"key": "department", "value": "finance"}, {"key": "manager", "value": "Rohan Deshpande"}]
+      "facts": [{"key": "department", "value": "finance"}, {"key": "manager", "value": "Rohan Deshpande"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 5, "session": "A", "user": "U1",
       "text": "Please only call me after 3 pm. Mornings are month-end close.",
       "tags": ["fact"],
-      "facts": [{"key": "contact_time", "value": "after 3 pm"}]
+      "facts": [{"key": "contact_time", "value": "after 3 pm"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 6, "session": "A", "user": "U1",
       "text": "I connect from home with Cisco AnyConnect.",
       "tags": ["fact"],
-      "facts": [{"key": "vpn_client", "value": "Cisco AnyConnect"}]
+      "facts": [{"key": "vpn_client", "value": "Cisco AnyConnect"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 7, "session": "A", "user": "U1",
       "text": "If the desk has to reach me, my personal number is 98220 11435.",
       "tags": ["fact"],
-      "facts": [{"key": "personal_phone", "value": "98220 11435"}]
+      "facts": [{"key": "personal_phone", "value": "98220 11435"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 8, "session": "A", "user": "U1",
       "text": "Thanks, that's everything about me for now.",
-      "tags": ["small_talk"]
+      "tags": ["small_talk"],
+      "expect": {
+        "intent": "out_of_scope",
+        "action": "none",
+        "reply_contains": [["IT issues", "welcome", "anything else", "glad"]],
+        "facts_written": 0
+      }
     },
     {
       "turn": 9, "session": "A", "user": "U1",
       "text": "The VPN keeps failing with ERR-VPN-809. What does that code mean?",
       "tags": ["kb_question", "event"],
-      "events": [{"type": "complaint", "summary": "VPN fails with ERR-VPN-809"}]
+      "events": [{"type": "complaint", "summary": "VPN fails with ERR-VPN-809"}],
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": [["certificate", "clock", "re-enrol"]],
+        "reply_is_unknown": false,
+        "citation": "KB-VPN",
+        "session_slots": {"error_code": "ERR-VPN-809"},
+        "facts_written": 0,
+        "db": {"tickets": 0, "bookings": 0}
+      }
     },
     {
       "turn": 10, "session": "A", "user": "U1",
       "text": "It's been doing this all week and it's blocking the month-end close. I'd like it raised as a ticket.",
       "tags": ["event"],
-      "events": [{"type": "ticket_raised", "summary": "Ticket requested for the ERR-VPN-809 VPN failure"}]
+      "events": [{"type": "ticket_raised", "summary": "Ticket requested for the ERR-VPN-809 VPN failure"}],
+      "expect": {
+        "intent": "fix_issue",
+        "action": "ask",
+        "ask_slot": "location",
+        "reply_contains": [["floor", "desk", "office"]],
+        "state": {"pending_booking": true, "awaiting_confirmation": false},
+        "db": {"tickets": 0, "bookings": 0}
+      }
     },
     {
       "turn": 11, "session": "A", "user": "U1",
       "text": "Can someone from the desk come to my desk and look at it?",
       "tags": ["slot_fill"],
-      "slots": {"issue_type": "VPN failure ERR-VPN-809"}
+      "slots": {"issue_type": "VPN failure ERR-VPN-809"},
+      "expect": {
+        "intent": ["book_slot", "fix_issue"],
+        "action": "ask",
+        "ask_slot": "location",
+        "reply_contains": [["floor", "desk", "office"]],
+        "session_slots": {"issue_type": "VPN ERR-VPN-809"}
+      }
     },
     {
       "turn": 12, "session": "A", "user": "U1",
       "text": "The Pune office.",
       "tags": ["slot_fill", "needs_clarification"],
-      "notes": "The site is known but the floor was never given as a slot, so the bot should ask which floor before booking."
+      "notes": "The site is known but the floor was never given as a slot, so the bot should ask which floor before booking.",
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": "location",
+        "reply_contains": [["floor", "desk"]],
+        "reply_not_contains": ["Which day", "What time", "Shall I book"],
+        "db": {"tickets": 0, "bookings": 0}
+      }
     },
     {
       "turn": 13, "session": "A", "user": "U1",
       "text": "Third floor, desk 14.",
       "tags": ["slot_fill"],
-      "slots": {"location": "Pune office, 3rd floor, desk 14"}
+      "slots": {"location": "Pune office, 3rd floor, desk 14"},
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": "date",
+        "reply_contains": [["day", "when", "date"]],
+        "session_slots": {"location": "Pune office, 3rd floor, desk 14"}
+      }
     },
     {
       "turn": 14, "session": "A", "user": "U1",
       "text": "Thursday, please.",
       "tags": ["slot_fill", "needs_clarification"],
-      "notes": "The day is known but not the time, so the bot should ask for a time of day."
+      "notes": "The day is known but not the time, so the bot should ask for a time of day.",
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": "time",
+        "reply_contains": [["time", "what time", "o'clock"]],
+        "session_slots": {"date": "Thursday"}
+      }
     },
     {
       "turn": 15, "session": "A", "user": "U1",
       "text": "Make it Thursday at 4 pm.",
       "tags": ["slot_fill"],
-      "slots": {"date": "Thursday", "time": "4 pm"}
+      "slots": {"date": "Thursday", "time": "4 pm"},
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": null,
+        "reply_contains": [["Shall I book", "confirm"]],
+        "session_slots": {"location": "Pune office, 3rd floor, desk 14", "date": "Thursday", "time": "4 pm"},
+        "state": {"pending_booking": true, "awaiting_confirmation": true},
+        "db": {"tickets": 0, "bookings": 0}
+      }
     },
     {
       "turn": 16, "session": "A", "user": "U1",
       "text": "Yes, go ahead and book that.",
       "tags": ["slot_fill", "confirmation", "event"],
       "notes": "The confirmed write. No booking row may exist before this turn.",
-      "events": [{"type": "booking", "summary": "Desk-side visit booked for Thursday at 4 pm, Pune office, 3rd floor, desk 14, for the VPN fault"}]
+      "events": [{"type": "booking", "summary": "Desk-side visit booked for Thursday at 4 pm, Pune office, 3rd floor, desk 14, for the VPN fault"}],
+      "expect": {
+        "intent": "confirm",
+        "action": "tool",
+        "tool": "book_it_slot",
+        "reply_contains": ["Thursday", ["4 pm", "4pm", "16:00"], ["booked", "scheduled"]],
+        "reply_not_contains": ["Shall I book"],
+        "state": {"pending_booking": false, "awaiting_confirmation": false},
+        "db": {"tickets": 1, "bookings": 1},
+        "db_rows": {
+          "tickets": [
+            {"ticket_id": "TCK-0001", "user": "U1", "issue_contains": "ERR-VPN-809", "asset_id": "LAP-T14G3", "status": "open"}
+          ],
+          "bookings": [
+            {"user": "U1", "location": "Pune office, 3rd floor, desk 14", "date": "Thursday", "time": "4 pm", "status": "booked", "ticket_id": "TCK-0001"}
+          ]
+        }
+      }
     },
     {
       "turn": 17, "session": "A", "user": "U1",
       "text": "And for Friday?",
       "tags": ["state_followup"],
-      "notes": "Depends on dialogue state: same site, floor and issue, with the day changed to Friday."
+      "notes": "Depends on dialogue state: same site, floor and issue, with the day changed to Friday.",
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "reply_contains": [["time", "Shall I book"]],
+        "reply_not_contains": ["Which office", "Which day"],
+        "session_slots": {"location": "Pune office, 3rd floor, desk 14", "date": "Friday", "issue_type": "VPN ERR-VPN-809"},
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 18, "session": "A", "user": "U1",
       "text": "The same time is fine.",
       "tags": ["state_followup"],
-      "notes": "Depends on dialogue state: Friday at the 4 pm already given."
+      "notes": "Depends on dialogue state: Friday at the 4 pm already given.",
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": null,
+        "reply_contains": [["Shall I book", "confirm"]],
+        "session_slots": {"location": "Pune office, 3rd floor, desk 14", "date": "Friday", "time": "4 pm"},
+        "state": {"pending_booking": true, "awaiting_confirmation": true},
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 19, "session": "A", "user": "U1",
       "text": "No, leave Friday. Thursday alone is enough.",
       "tags": ["slot_fill"],
-      "notes": "Cancels the follow-up before it is confirmed, so only the Thursday booking is written."
+      "notes": "Cancels the follow-up before it is confirmed, so only the Thursday booking is written.",
+      "expect": {
+        "intent": "reject",
+        "action": "none",
+        "reply_contains": [["won't book", "will not book", "not book", "cancel", "okay"]],
+        "reply_not_contains": ["Shall I book", "Which day", "What time"],
+        "state": {"pending_booking": false, "awaiting_confirmation": false},
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 20, "session": "A", "user": "U1",
       "text": "One more thing: I've moved. I'm at the Hyderabad office now, not Pune.",
       "tags": ["fact_update"],
-      "updates": [{"key": "office", "old": "Pune", "new": "Hyderabad"}]
+      "updates": [{"key": "office", "old": "Pune", "new": "Hyderabad"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]],
+        "reply_not_contains": ["Which day", "Shall I book", "What time"],
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 21, "session": "A", "user": "U1",
       "text": "And my manager changed too. It's Priya Nair now, not Rohan Deshpande.",
       "tags": ["fact_update"],
-      "updates": [{"key": "manager", "old": "Rohan Deshpande", "new": "Priya Nair"}]
+      "updates": [{"key": "manager", "old": "Rohan Deshpande", "new": "Priya Nair"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]],
+        "reply_not_contains": ["Which day", "Shall I book"]
+      }
     },
     {
       "turn": 22, "session": "A", "user": "U1",
       "text": "Please forget my personal phone number. Don't keep 98220 11435.",
       "tags": ["forget"],
-      "forgets": [{"key": "personal_phone", "value": "98220 11435"}]
+      "forgets": [{"key": "personal_phone", "value": "98220 11435"}],
+      "expect": {
+        "intent": "forget",
+        "action": "none",
+        "reply_contains": [["forgotten", "forgot", "deleted", "removed"]],
+        "reply_not_contains": ["98220", "11435"],
+        "facts_written": 0
+      }
     },
     {
       "turn": 23, "session": "A", "user": "U1",
       "text": "How long is the laptop refresh cycle now, and which model would I get?",
-      "tags": ["kb_question"]
+      "tags": ["kb_question"],
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": [["three years", "3 years", "three-year"], "LAP-T14G5"],
+        "reply_not_contains": ["four years", "four-year", "4 years", "Shall I book", "Which day"],
+        "reply_is_unknown": false,
+        "citation": "KB-LAPTOP@2026.1",
+        "state": {"pending_booking": false, "awaiting_confirmation": false},
+        "facts_written": 0,
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 24, "session": "A", "user": "U1",
       "text": "Given that, I'd like to go ahead with the refresh rather than another repair.",
       "tags": ["event"],
-      "events": [{"type": "decision", "summary": "Chose a laptop refresh over another repair of the LAP-T14G3"}]
+      "events": [{"type": "decision", "summary": "Chose a laptop refresh over another repair of the LAP-T14G3"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]],
+        "reply_not_contains": ["booked", "Which day", "Shall I book", "TCK-"],
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 25, "session": "A", "user": "U1",
       "text": "Thanks, that's all for today.",
-      "tags": ["small_talk"]
+      "tags": ["small_talk"],
+      "expect": {
+        "intent": "out_of_scope",
+        "action": "none",
+        "reply_contains": [["IT issues", "welcome", "anything else", "glad"]],
+        "facts_written": 0
+      }
     },
     {
+      "_comment": "SESSION RESET (the new-tab point). After turn 25 the runner calls memory.end_session(): it writes the reflection episode and deletes the working summary. The Session A object is then dropped, and a new Session for (U1, B) is built with empty slots, empty history, turn counter at 0, and no pending booking or confirmation. Only what is on disk carries over: memory/semantic.jsonl, memory/episodic.jsonl and the SQLite tickets and bookings. So every recall from turn 26 on has to be read back from those files.",
       "turn": 26, "session": "B", "user": "U1",
       "text": "Hi, it's Meera again. What did I book last time, and what was it for?",
-      "tags": ["probe_seed"]
+      "tags": ["probe_seed"],
+      "expect": {
+        "intent": ["check_ticket", "recall_fact"],
+        "action": "tool",
+        "tool": ["recall_episode", "get_booking"],
+        "reply_contains": ["Thursday", ["4 pm", "4pm", "16:00"], ["Pune", "desk 14", "3rd floor", "third floor"], ["VPN", "ERR-VPN-809"]],
+        "reply_not_contains": ["Hyderabad"],
+        "reply_is_unknown": false,
+        "facts_written": 0,
+        "db": {"tickets": 1, "bookings": 1}
+      }
     },
     {
       "turn": 27, "session": "B", "user": "U1",
       "text": "Which office did I say I'm based at now?",
-      "tags": ["probe_seed"]
+      "tags": ["probe_seed"],
+      "expect": {
+        "intent": "recall_fact",
+        "action": "tool",
+        "tool": "recall_fact",
+        "reply_contains": ["Hyderabad"],
+        "reply_not_contains": ["Pune"],
+        "reply_is_unknown": false,
+        "citation": "mem",
+        "facts_written": 0
+      }
     },
     {
       "turn": 28, "session": "B", "user": "U1",
       "text": "What number did I give you for my personal phone?",
       "tags": ["probe_seed"],
-      "notes": "The number was forgotten in turn 22, so the expected behaviour is to say it is not known."
+      "notes": "The number was forgotten in turn 22, so the expected behaviour is to say it is not known.",
+      "expect": {
+        "intent": "recall_fact",
+        "action": "none",
+        "reply_not_contains": ["98220", "11435"],
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0
+      }
     },
     {
       "turn": 29, "session": "B", "user": "U1",
       "text": "What does SLA-P1 promise for a first response?",
-      "tags": ["kb_question"]
+      "tags": ["kb_question"],
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": ["15 minutes"],
+        "reply_is_unknown": false,
+        "citation": "KB-SLA",
+        "facts_written": 0
+      }
     },
     {
       "turn": 30, "session": "B", "user": "U1",
       "text": "Lovely weather today, isn't it?",
-      "tags": ["small_talk"]
+      "tags": ["small_talk"],
+      "expect": {
+        "intent": "out_of_scope",
+        "action": "none",
+        "reply_contains": [["IT issues"]],
+        "citation": "none",
+        "facts_written": 0
+      }
     },
     {
+      "_comment": "USER SWITCH, not a session reset. U2 gets their own Session object for (U2, B), so none of U1's slots are visible. Isolation of stored facts comes from the memory stores filtering by user id.",
       "turn": 31, "session": "B", "user": "U2",
       "text": "Hello, I'm Arjun Shah, employee E-11007, in the sales department.",
       "tags": ["fact"],
-      "facts": [{"key": "department", "value": "sales"}]
+      "facts": [{"key": "department", "value": "sales"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 32, "session": "B", "user": "U2",
       "text": "I use a LAP-MBP14 and I work from the Bengaluru office.",
       "tags": ["fact"],
-      "facts": [{"key": "laptop_model", "value": "LAP-MBP14"}, {"key": "office", "value": "Bengaluru"}]
+      "facts": [{"key": "laptop_model", "value": "LAP-MBP14"}, {"key": "office", "value": "Bengaluru"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 33, "session": "B", "user": "U2",
       "text": "My manager is Kavita Rao, and mornings before 11 am are best for a call.",
       "tags": ["fact"],
-      "facts": [{"key": "manager", "value": "Kavita Rao"}, {"key": "contact_time", "value": "before 11 am"}]
+      "facts": [{"key": "manager", "value": "Kavita Rao"}, {"key": "contact_time", "value": "before 11 am"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 34, "session": "B", "user": "U2",
       "text": "Which office is Meera Iyer based at?",
       "tags": ["isolation"],
-      "notes": "Only U1 ever stated an office. U2 must not be told."
+      "notes": "Only U1 ever stated an office. U2 must not be told.",
+      "expect": {
+        "intent": "recall_fact",
+        "action": "none",
+        "reply_not_contains": ["Hyderabad", "Pune", "Bengaluru"],
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0
+      }
     },
     {
       "turn": 35, "session": "B", "user": "U2",
       "text": "What personal phone number do you have on file for her?",
       "tags": ["isolation"],
-      "notes": "The number was only ever said by U1, and was then forgotten."
+      "notes": "The number was only ever said by U1, and was then forgotten.",
+      "expect": {
+        "intent": "recall_fact",
+        "action": "none",
+        "reply_not_contains": ["98220", "11435"],
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0
+      }
     },
     {
       "turn": 36, "session": "B", "user": "U2",
       "text": "How long does a guest Wi-Fi pass last?",
-      "tags": ["kb_question"]
+      "tags": ["kb_question"],
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": [["eight hours", "8 hours"]],
+        "reply_is_unknown": false,
+        "citation": "KB-WIFI",
+        "facts_written": 0
+      }
     },
     {
       "turn": 37, "session": "B", "user": "U2",
       "text": "Appreciate the help, thanks so much.",
-      "tags": ["small_talk"]
+      "tags": ["small_talk"],
+      "expect": {
+        "intent": "out_of_scope",
+        "action": "none",
+        "reply_contains": [["IT issues", "welcome", "anything else", "glad"]],
+        "facts_written": 0
+      }
     },
     {
+      "_comment": "U1 RETURNS. No reset: the runner keeps one Session per (user, session), so this is the same (U1, B) object that handled turns 26-30, with its slots and history intact.",
       "turn": 38, "session": "B", "user": "U1",
       "text": "Meera again. Is there a way to print to my home printer while the VPN is connected?",
-      "tags": ["kb_question"]
+      "tags": ["kb_question"],
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": [["no supported way", "not supported", "cannot", "can't", "print before connecting", "PRINT-FOLLOWME", "follow-me"]],
+        "reply_is_unknown": false,
+        "citation": ["KB-PRINTERS", "KB-VPN"],
+        "facts_written": 0
+      }
     },
     {
       "turn": 39, "session": "B", "user": "U1",
       "text": "By the way, my laptop model has changed. I have a LAP-T14G5 now.",
       "tags": ["fact_update"],
-      "updates": [{"key": "laptop_model", "old": "LAP-T14G3", "new": "LAP-T14G5"}]
+      "updates": [{"key": "laptop_model", "old": "LAP-T14G3", "new": "LAP-T14G5"}],
+      "expect": {
+        "intent": "provide_info",
+        "action": "none",
+        "reply_contains": [["keep that in mind", "noted", "remember", "thanks"]]
+      }
     },
     {
       "turn": 40, "session": "B", "user": "U1",
       "text": "Hope your day is going well!",
-      "tags": ["small_talk"]
+      "tags": ["small_talk"],
+      "expect": {
+        "intent": "out_of_scope",
+        "action": "none",
+        "reply_contains": [["IT issues", "welcome", "anything else", "glad"]],
+        "facts_written": 0
+      }
     },
     {
       "turn": 41, "session": "B", "user": "U1",
       "text": "Who is my manager now?",
-      "tags": ["probe_seed"]
+      "tags": ["probe_seed"],
+      "expect": {
+        "intent": "recall_fact",
+        "action": "tool",
+        "tool": "recall_fact",
+        "reply_contains": ["Priya Nair"],
+        "reply_not_contains": ["Rohan"],
+        "reply_is_unknown": false,
+        "citation": "mem",
+        "facts_written": 0
+      }
     },
     {
       "turn": 42, "session": "B", "user": "U1",
       "text": "Great, thanks for the help today.",
-      "tags": ["small_talk"]
+      "tags": ["small_talk"],
+      "expect": {
+        "intent": "out_of_scope",
+        "action": "none",
+        "reply_contains": [["IT issues", "welcome", "anything else", "glad"]],
+        "facts_written": 0
+      }
+    },
+    {
+      "_comment": "TURNS 43-60 WERE APPENDED to cover paths turns 1-42 never reach: ticket and booking lookups, a reschedule (update_slot), a question asked in the middle of a booking, records of one user asked by another, a second user who books, a versioned KB document, and a question the KB cannot answer. They are appended so every evidence_turn in probes.json stays valid. The reschedule is done by U2, not U1, so U1's Thursday 4 pm row (probe P07) is not changed. They add no facts, updates, forgets or events for U1, and no turn tagged 'confirmation', so the validator and the bench_index counts are unchanged. ORDER MATTERS: naming a ticket id sets the ticket_id slot, so U2 asks about TCK-0001 by id last.",
+      "turn": 43, "session": "B", "user": "U2",
+      "text": "What is my last booking?",
+      "tags": ["isolation"],
+      "notes": "U2 has booked nothing. U1's Thursday visit is in the same table and must not be shown.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_booking",
+        "reply_not_contains": ["Pune", "Thursday", "desk 14", "4 pm", "ERR-VPN-809"],
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0,
+        "db": {"tickets": 1, "bookings": 1}
+      }
+    },
+    {
+      "turn": 44, "session": "B", "user": "U2",
+      "text": "What was the last ticket I raised?",
+      "tags": ["isolation"],
+      "notes": "U2 has no ticket. TCK-0001 belongs to U1 and must not be shown.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_ticket",
+        "reply_not_contains": ["TCK-0001", "ERR-VPN-809"],
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0,
+        "db": {"tickets": 1, "bookings": 1}
+      }
+    },
+    {
+      "turn": 45, "session": "B", "user": "U2",
+      "text": "My laptop keeps dropping off CORP-WIFI. Please raise a ticket for it.",
+      "tags": ["slot_fill"],
+      "notes": "U2's first fault report. Nothing is written until U2 confirms.",
+      "expect": {
+        "intent": "fix_issue",
+        "action": "ask",
+        "ask_slot": "location",
+        "reply_contains": [["floor", "desk", "office"]],
+        "state": {"pending_booking": true, "awaiting_confirmation": false},
+        "db": {"tickets": 1, "bookings": 1}
+      }
+    },
+    {
+      "turn": 46, "session": "B", "user": "U2",
+      "text": "Does CORP-WIFI need a password?",
+      "tags": ["kb_question", "mid_booking"],
+      "notes": "A question asked while a visit is still being collected. It is answered from the KB and the visit stays open.",
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": [["no password", "certificate"]],
+        "reply_is_unknown": false,
+        "citation": "KB-WIFI",
+        "state": {"pending_booking": true, "awaiting_confirmation": false},
+        "facts_written": 0,
+        "db": {"tickets": 1, "bookings": 1}
+      }
+    },
+    {
+      "turn": 47, "session": "B", "user": "U2",
+      "text": "Bengaluru office, second floor, desk 7.",
+      "tags": ["slot_fill"],
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": "date",
+        "reply_contains": [["day", "when", "date"]],
+        "session_slots": {"location": "Bengaluru office, 2nd floor, desk 7"},
+        "state": {"pending_booking": true, "awaiting_confirmation": false}
+      }
+    },
+    {
+      "turn": 48, "session": "B", "user": "U2",
+      "text": "Tuesday at 10 am.",
+      "tags": ["slot_fill"],
+      "notes": "Day and time in one answer, so the bot goes straight to the confirmation question.",
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": null,
+        "reply_contains": [["Shall I book", "confirm"]],
+        "session_slots": {"location": "Bengaluru office, 2nd floor, desk 7", "date": "Tuesday", "time": "10 am"},
+        "state": {"pending_booking": true, "awaiting_confirmation": true},
+        "db": {"tickets": 1, "bookings": 1}
+      }
+    },
+    {
+      "turn": 49, "session": "B", "user": "U2",
+      "text": "Yes.",
+      "tags": ["slot_fill", "second_user_write"],
+      "notes": "U2's own write: a ticket and a visit. Not tagged 'confirmation', because the validator allows exactly one such turn.",
+      "expect": {
+        "intent": "confirm",
+        "action": "tool",
+        "tool": "book_it_slot",
+        "reply_contains": ["Tuesday", ["10 am", "10am", "10:00"], ["booked", "scheduled"]],
+        "reply_not_contains": ["Shall I book"],
+        "state": {"pending_booking": false, "awaiting_confirmation": false},
+        "db": {"tickets": 2, "bookings": 2},
+        "db_rows": {
+          "tickets": [
+            {"ticket_id": "TCK-0002", "user": "U2", "asset_id": "LAP-MBP14", "status": "open"}
+          ],
+          "bookings": [
+            {"user": "U2", "location": "Bengaluru office, 2nd floor, desk 7", "date": "Tuesday", "time": "10 am", "status": "booked", "ticket_id": "TCK-0002"}
+          ]
+        }
+      }
+    },
+    {
+      "turn": 50, "session": "B", "user": "U2",
+      "text": "Can I change the timing of my booking?",
+      "tags": ["reschedule"],
+      "notes": "A change to a visit that is already booked. The day and the place stay and only the time is asked again.",
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": "time",
+        "reply_contains": [["time", "what time"]],
+        "reply_not_contains": ["Which office", "Which day"],
+        "session_slots": {"location": "Bengaluru office, 2nd floor, desk 7", "date": "Tuesday"},
+        "state": {"pending_booking": true, "awaiting_confirmation": false},
+        "db": {"tickets": 2, "bookings": 2}
+      }
+    },
+    {
+      "turn": 51, "session": "B", "user": "U2",
+      "text": "Move it to 2 pm.",
+      "tags": ["reschedule"],
+      "expect": {
+        "intent": "book_slot",
+        "action": "ask",
+        "ask_slot": null,
+        "reply_contains": [["Shall I book", "confirm"]],
+        "session_slots": {"location": "Bengaluru office, 2nd floor, desk 7", "date": "Tuesday", "time": "2 pm"},
+        "state": {"pending_booking": true, "awaiting_confirmation": true},
+        "db": {"tickets": 2, "bookings": 2}
+      }
+    },
+    {
+      "turn": 52, "session": "B", "user": "U2",
+      "text": "Yes.",
+      "tags": ["reschedule", "second_user_write"],
+      "notes": "Must update the existing row. A second booking row, or a second ticket, is a failure.",
+      "expect": {
+        "intent": "confirm",
+        "action": "tool",
+        "tool": "update_slot",
+        "reply_contains": ["Tuesday", ["2 pm", "2pm", "14:00"], ["updated", "changed", "moved", "rescheduled"]],
+        "reply_not_contains": ["Shall I book"],
+        "state": {"pending_booking": false, "awaiting_confirmation": false},
+        "db": {"tickets": 2, "bookings": 2},
+        "db_rows": {
+          "bookings": [
+            {"user": "U2", "location": "Bengaluru office, 2nd floor, desk 7", "date": "Tuesday", "time": "2 pm", "status": "booked", "ticket_id": "TCK-0002"}
+          ]
+        }
+      }
+    },
+    {
+      "turn": 53, "session": "B", "user": "U2",
+      "text": "What is my last booking?",
+      "tags": ["probe_seed"],
+      "notes": "Reads the changed row. The newest row in the table is U2's, not U1's Thursday visit.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_booking",
+        "reply_contains": ["Tuesday", ["2 pm", "2pm", "14:00"], ["Bengaluru", "desk 7"]],
+        "reply_not_contains": ["Pune", "Thursday", "desk 14"],
+        "reply_is_unknown": false,
+        "facts_written": 0,
+        "db": {"tickets": 2, "bookings": 2}
+      }
+    },
+    {
+      "turn": 54, "session": "B", "user": "U2",
+      "text": "What was the last ticket I raised?",
+      "tags": ["probe_seed"],
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_ticket",
+        "reply_contains": ["TCK-0002"],
+        "reply_not_contains": ["TCK-0001", "ERR-VPN-809"],
+        "reply_is_unknown": false,
+        "facts_written": 0
+      }
+    },
+    {
+      "turn": 55, "session": "B", "user": "U2",
+      "text": "What is the status of TCK-0001?",
+      "tags": ["isolation"],
+      "notes": "A ticket id that exists but belongs to U1. Asked last of U2's lookups, because naming an id sets the ticket_id slot.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_ticket",
+        "reply_not_contains": ["ERR-VPN-809", "Pune", "VPN"],
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0
+      }
+    },
+    {
+      "_comment": "U1 RETURNS to the same (U1, B) Session object as turns 26-30 and 38-42.",
+      "turn": 56, "session": "B", "user": "U1",
+      "text": "What was the last ticket I raised?",
+      "tags": ["probe_seed"],
+      "notes": "U2 raised TCK-0002 after U1's ticket. U1 must still get TCK-0001.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_ticket",
+        "reply_contains": ["TCK-0001"],
+        "reply_not_contains": ["TCK-0002", "CORP-WIFI", "Bengaluru"],
+        "reply_is_unknown": false,
+        "facts_written": 0,
+        "db": {"tickets": 2, "bookings": 2}
+      }
+    },
+    {
+      "turn": 57, "session": "B", "user": "U1",
+      "text": "What is my last booking?",
+      "tags": ["probe_seed"],
+      "notes": "U2's visit is newer, but U1 must still get the Thursday visit.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "tool",
+        "tool": "get_booking",
+        "reply_contains": ["Thursday", ["4 pm", "4pm", "16:00"], ["Pune", "desk 14"]],
+        "reply_not_contains": ["Bengaluru", "Tuesday", "TCK-0002"],
+        "reply_is_unknown": false,
+        "facts_written": 0
+      }
+    },
+    {
+      "turn": 58, "session": "B", "user": "U1",
+      "text": "What is the status of my ticket?",
+      "tags": ["needs_clarification"],
+      "notes": "Names no id and does not say 'last', so the bot has to ask which ticket instead of guessing.",
+      "expect": {
+        "intent": "check_ticket",
+        "action": "ask",
+        "ask_slot": null,
+        "reply_contains": [["Which ticket"]],
+        "facts_written": 0
+      }
+    },
+    {
+      "turn": 59, "session": "B", "user": "U1",
+      "text": "How often do I have to change my network password?",
+      "tags": ["kb_question", "versioned"],
+      "notes": "KB-PASSWORD has a 2025 version with a 90-day expiry and a 2026 version with none. The 2026 policy wins.",
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_contains": [["no periodic expiry", "no expiry", "does not expire", "doesn't expire", "only when", "no longer", "not required"]],
+        "reply_not_contains": ["every 90 days", "90-day", "every three months"],
+        "reply_is_unknown": false,
+        "citation": "KB-PASSWORD@2026.1",
+        "facts_written": 0
+      }
+    },
+    {
+      "turn": 60, "session": "B", "user": "U1",
+      "text": "What are the opening hours of the staff cafeteria?",
+      "tags": ["kb_question", "no_answer"],
+      "notes": "Nothing in the knowledge base covers this. The reply should say it does not know, and must not quote an unrelated passage.",
+      "expect": {
+        "intent": "ask_kb",
+        "action": "tool",
+        "tool": "search_kb",
+        "reply_is_unknown": true,
+        "citation": "none",
+        "facts_written": 0
+      }
     }
   ]
 }
