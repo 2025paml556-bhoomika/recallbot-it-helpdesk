@@ -1,6 +1,6 @@
 # UI test script
 
-Type these in the chat at http://127.0.0.1:8000, one line at a time, in order.
+Type these in the chat at http://127.0.0.1:8002, one line at a time, in order.
 Wait for the reply before sending the next line. The user box starts as U1.
 Do not click End session between cases unless a case says to.
 

@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 
 from src.agent import Session
 from src.config import ABLATION_CONFIGS, ROOT
 from src.memory import Memory
 from src.run_history import _passed, load_probes, load_turns
+from src.run_state import recalled_view, snapshot
+from src.turn_check import check_turn
 
 RUNS_ROOT = ROOT / "results" / "runs"
 
@@ -30,7 +33,7 @@ RUNS_ROOT = ROOT / "results" / "runs"
 STRATEGY = "trim"
 
 
-def run_config(config: str, *, sessions: tuple[str, ...] = ("A", "B")) -> dict:
+def run_config(config: str, *, sessions: tuple[str, ...] = ("A", "B"), raw: bool = False) -> dict:
     """Play the named sessions in order, each in its own Session object.
 
     A and B share the folder. They share nothing else: B's Session is built
@@ -46,9 +49,23 @@ def run_config(config: str, *, sessions: tuple[str, ...] = ("A", "B")) -> dict:
     db_path = root / "helpdesk.sqlite"
     run_id = f"abl-{config}"
 
-    transcript = {"config": config, "run_id": run_id, "sessions": []}
+    # A run that starts at Session A starts from nothing. Without this a
+    # second run would begin with the facts and bookings of the first, and
+    # the step-by-step replay could not start from an empty state. Running
+    # Session B alone keeps what A left behind, which is the point of it.
+    if "A" in sessions:
+        shutil.rmtree(memory_root, ignore_errors=True)
+        db_path.unlink(missing_ok=True)
+
+    transcript = {
+        "config": config,
+        "run_id": run_id,
+        # Step 0 of the replay: nothing stored yet.
+        "initial_state": snapshot(memory_root, db_path),
+        "sessions": [],
+    }
     for name in sessions:
-        played = _play_session(config, name, memory_root, db_path, run_id)
+        played = _play_session(config, name, memory_root, db_path, run_id, raw)
         transcript["sessions"].append(played)
 
     root.mkdir(parents=True, exist_ok=True)
@@ -59,7 +76,7 @@ def run_config(config: str, *, sessions: tuple[str, ...] = ("A", "B")) -> dict:
     return transcript
 
 
-def _play_session(config: str, name: str, memory_root, db_path, run_id: str) -> dict:
+def _play_session(config: str, name: str, memory_root, db_path, run_id: str, raw: bool = False) -> dict:
     """One session, from a Session built fresh against the folder on disk."""
     turns = load_turns(name)
     probes = load_probes(name)
@@ -86,18 +103,33 @@ def _play_session(config: str, name: str, memory_root, db_path, run_id: str) -> 
     for turn in turns:
         session = get(turn["user"])
         text = turn["text"]
-        session.ingest(text)
+        labelled = session.ingest(text)
         decision = session.decide(text)
         said = session.reply(text, decision)
-        replies.append(
-            {
-                "turn": turn["turn"],
-                "user": turn["user"],
-                "text": text,
-                "bot": said,
-                "action": decision.get("action"),
-            }
-        )
+        # Recorded after the turn is done: what happened, next to what the
+        # script said should happen, and the fields that differ.
+        row = {
+            "turn": turn["turn"],
+            "user": turn["user"],
+            "text": text,
+            "bot": said,
+            "action": decision.get("action"),
+            "tool": decision.get("name"),
+            "intent": labelled.get("intent"),
+            "slots": {k: v for k, v in labelled.get("slots", {}).items() if v},
+            "recalled": recalled_view(labelled.get("recalled", {})),
+            # What is on disk now, so the page can show this step on its own.
+            "state": snapshot(memory_root, db_path),
+        }
+        if not raw:
+            checked = check_turn(turn, session, decision, said)
+            row.update(
+                expect=checked["expect"],
+                actual=checked["actual"],
+                misses=checked["misses"],
+                passed=checked["passed"],
+            )
+        replies.append(row)
 
     for session in open_sessions.values():
         # The reflection and the summary episode are written here, before
@@ -114,11 +146,13 @@ def _play_session(config: str, name: str, memory_root, db_path, run_id: str) -> 
             config=config,
         )
 
-    asked = _ask_probes(probes, memory_root, db_path, run_id, config, name)
-    return {"session": name, "turns": replies, "probes": asked}
+    # The reflection and the summary episode exist only after the close above.
+    closed_state = snapshot(memory_root, db_path)
+    asked = _ask_probes(probes, memory_root, db_path, run_id, config, name, raw)
+    return {"session": name, "turns": replies, "closed_state": closed_state, "probes": asked}
 
 
-def _ask_probes(probes, memory_root, db_path, run_id, config, name) -> list[dict]:
+def _ask_probes(probes, memory_root, db_path, run_id, config, name, raw: bool = False) -> list[dict]:
     """Ask each probe against a Session built after the conversation closed.
 
     A new Session has empty slots. A probe that passes is passing on what
@@ -137,21 +171,24 @@ def _ask_probes(probes, memory_root, db_path, run_id, config, name) -> list[dict
         )
         session.run_id = run_id
         text = probe["question"]
-        session.ingest(text)
+        labelled = session.ingest(text)
         decision = session.decide(text)
         said = session.reply(text, decision)
-        asked.append(
-            {
-                "id": probe["id"],
-                "category": probe["category"],
-                "user": user,
-                "question": text,
-                "expected": probe["expected"],
-                "evidence_turn": probe.get("evidence_turn"),
-                "reply": said,
-                "passed": _passed(probe, said),
-            }
-        )
+        entry = {
+            "intent": labelled.get("intent"),
+            "recalled": recalled_view(labelled.get("recalled", {})),
+            "state": snapshot(memory_root, db_path),
+            "id": probe["id"],
+            "category": probe["category"],
+            "user": user,
+            "question": text,
+            "expected": probe["expected"],
+            "evidence_turn": probe.get("evidence_turn"),
+            "reply": said,
+        }
+        if not raw:
+            entry["passed"] = _passed(probe, said)
+        asked.append(entry)
     return asked
 
 
@@ -159,13 +196,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run Sessions A and B under one configuration")
     parser.add_argument("--config", choices=ABLATION_CONFIGS, default="hybrid_mem")
     parser.add_argument("--session", choices=("A", "B"))
+    parser.add_argument("--raw", action="store_true", help="record the conversation only, no expect comparison")
     args = parser.parse_args()
     sessions = (args.session,) if args.session else ("A", "B")
-    transcript = run_config(args.config, sessions=sessions)
+    transcript = run_config(args.config, sessions=sessions, raw=args.raw)
     for played in transcript["sessions"]:
+        if args.raw:
+            print(f"{args.config} session {played['session']}: {len(played['turns'])} turns, {len(played['probes'])} probes (raw)")
+            continue
         probes = played["probes"]
         passed = sum(1 for probe in probes if probe["passed"])
-        print(f"{args.config} session {played['session']}: {len(played['turns'])} turns, probes {passed}/{len(probes)}")
+        turns = played["turns"]
+        ok = sum(1 for turn in turns if turn["passed"])
+        print(
+            f"{args.config} session {played['session']}: turns {ok}/{len(turns)} match expect, "
+            f"probes {passed}/{len(probes)}"
+        )
+        for turn in turns:
+            for miss in turn["misses"]:
+                print(f"  turn {turn['turn']} {miss['field']}: expected {miss['expected']!r}, got {miss['actual']!r}")
 
 
 if __name__ == "__main__":

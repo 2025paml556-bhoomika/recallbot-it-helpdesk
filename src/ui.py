@@ -17,17 +17,21 @@ from __future__ import annotations
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlparse
 
 from src.agent import Session
-from src.config import DB_PATH
+from src.config import ABLATION_CONFIGS, DB_PATH
 from src.history import STRATEGIES
 from src.episodic_memory import EPISODIC_PATH
 from src.semantic_memory import SEMANTIC_PATH
 from src.db import connect
 
 HOST = "127.0.0.1"
-PORT = 8000
+PORT = 8002
+
+# Saved runs written by src.run, one folder per configuration.
+RUNS_ROOT = Path(__file__).resolve().parent.parent / "results" / "runs"
 
 # One Session per (user, session). A switch drops the old one, so its slots
 # do not leak, which is the same rule the isolation tests check.
@@ -82,6 +86,24 @@ def snapshot(user: str) -> dict:
         "tickets": [row for row in _table("tickets") if row.get("owner_user") == who],
         "bookings": [row for row in _table("slots") if row.get("owner_user") == who],
     }
+
+
+def list_runs() -> list[str]:
+    """Configurations that have a saved transcript, in the ablation order."""
+    return [
+        name for name in ABLATION_CONFIGS if (RUNS_ROOT / name / "transcript.json").exists()
+    ]
+
+
+def load_run(config: str) -> dict | None:
+    """One saved transcript, or None. The name is checked against the known
+    configurations, so the query string cannot point at another path."""
+    if config not in ABLATION_CONFIGS:
+        return None
+    path = RUNS_ROOT / config / "transcript.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _read_jsonl(path) -> list[dict]:
@@ -200,6 +222,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
             return
+        if path == "/api/runs":
+            self._send_json({"runs": list_runs()})
+            return
+        if path == "/api/run":
+            found = load_run(self._query().get("config", ""))
+            if found is None:
+                self._send_json({"error": "no saved run for that configuration"}, status=404)
+                return
+            self._send_json(found)
+            return
         if path == "/api/state":
             user = self._query().get("user", "U1")
             self._send_json({"state": snapshot(user)})
@@ -310,6 +342,23 @@ PAGE = """<!DOCTYPE html>
   td { padding: 4px 6px; border-bottom: 1px solid #f0e9de; vertical-align: top; }
   tr.changed td { background: #f4eccf; }
   td.when { white-space: nowrap; }
+  [hidden] { display: none !important; }
+  #replay { max-height: 72vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .session-head { font: 600 13px sans-serif; letter-spacing: .06em; text-transform: uppercase;
+                  background: #231f1a; color: #f4f1ea; border-radius: 6px; padding: 6px 10px;
+                  margin-top: 10px; }
+  .turn-tag { font: 11px ui-monospace, monospace; color: #7a7064; margin-bottom: 2px; }
+  .probe { border: 1px solid #e2d9cc; border-radius: 6px; padding: 8px 10px; background: #f7f3eb;
+           font-size: 14px; }
+  .probe .q { font-weight: 600; }
+  .probe .exp { font: 12px ui-monospace, monospace; color: #5c564d; }
+  .stepper { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  #step-label { font: 12px ui-monospace, monospace; color: #5c564d; }
+  .now { outline: 2px solid #c9a227; outline-offset: 3px; }
+  .closed { border: 1px dashed #c9bfb0; border-radius: 6px; padding: 8px 10px;
+            font-size: 14px; background: #f7f3eb; }
+  .ok { color: #2d6a3a; }
+  .bad { color: #8d2d22; }
 </style>
 </head>
 <body>
@@ -326,12 +375,26 @@ PAGE = """<!DOCTYPE html>
     </select>
   </label>
   <button type="button" class="ghost" id="do-clear">Clear this user</button>
+  <label>Saved run
+    <select id="run-config"></select>
+  </label>
+  <button type="button" class="ghost" id="do-load">Load run</button>
+  <button type="button" class="ghost" id="do-live" hidden>Back to live</button>
   <span id="session-label"></span>
   <span style="font:12px sans-serif;color:#9a9084">Each tab is its own session. Facts in memory/ carry over; this tab's slots do not.</span>
 </header>
 <main>
   <section>
-    <h2>Conversation</h2>
+    <h2 id="convo-title">Conversation</h2>
+    <div id="stepper" class="stepper" hidden>
+      <button type="button" class="ghost" id="step-restart">Restart</button>
+      <button type="button" class="ghost" id="step-back">Back</button>
+      <button type="button" id="step-next">Next step</button>
+      <button type="button" class="ghost" id="step-session">Skip to end of session</button>
+      <span id="step-label"></span>
+    </div>
+    <div id="replay" hidden></div>
+    <div id="live">
     <div id="log"></div>
     <form id="composer">
       <textarea id="text" placeholder="I sit at the Pune office and I use LAP-T14G3." autofocus></textarea>
@@ -344,6 +407,7 @@ PAGE = """<!DOCTYPE html>
     <div class="row">
       <input id="reflection" placeholder="reflection written when the session ends">
       <button type="button" class="ghost" id="do-end">End session</button>
+    </div>
     </div>
   </section>
   <section>
@@ -557,6 +621,188 @@ $("user").addEventListener("change", async () => {
   renderState((await res.json()).state);
 });
 
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+// A saved run is flattened into steps. Step 0 is the empty start. Then one
+// step per turn, one for the session closing (where the reflection is
+// written), and one per probe. Each step carries the state on disk after it.
+let steps = [];
+let at = 0;
+let runInfo = null;
+
+function buildSteps(data) {
+  const out = [{
+    kind: "start", session: "", user: "U1",
+    state: data.initial_state, recalled: {facts: [], episodes: []}, slots: {},
+  }];
+  for (const played of data.sessions) {
+    for (const t of played.turns || []) {
+      out.push({kind: "turn", session: played.session, user: t.user, row: t,
+        state: t.state, recalled: t.recalled, slots: t.slots || {}});
+    }
+    const last = (played.turns || []).slice(-1)[0];
+    out.push({kind: "close", session: played.session, user: last ? last.user : "U1",
+      state: played.closed_state, recalled: {facts: [], episodes: []}, slots: {}});
+    for (const p of played.probes || []) {
+      out.push({kind: "probe", session: played.session, user: p.user, row: p,
+        state: p.state, recalled: p.recalled, slots: {}});
+    }
+  }
+  return out;
+}
+
+function mine(state, user) {
+  // The files hold every user. Show the one speaking at this step.
+  return {
+    facts: state.facts.filter(r => r.user === user),
+    episodes: state.episodes.filter(r => r.user === user),
+    tickets: state.tickets.filter(r => r.owner_user === user),
+    bookings: state.bookings.filter(r => r.owner_user === user),
+  };
+}
+
+function describe(step, index) {
+  if (step.kind === "start") return "Start - nothing stored yet";
+  if (step.kind === "turn") return "Session " + step.session + " - turn " + step.row.turn + " (" + step.user + ")";
+  if (step.kind === "close") return "Session " + step.session + " closes";
+  return "Probe " + step.row.id + " (" + step.user + ")";
+}
+
+function showStep() {
+  const box = $("replay");
+  box.innerHTML = "";
+  let shown = null;
+  let lastSession = null;
+  for (let i = 0; i <= at; i++) {
+    const step = steps[i];
+    if (step.kind === "start") continue;
+    if (step.session !== lastSession) {
+      box.appendChild(el("div", "session-head", "Session " + step.session + " - " + runInfo.config));
+      lastSession = step.session;
+    }
+    let node;
+    if (step.kind === "turn") {
+      node = el("div", "");
+      node.appendChild(el("div", "turn-tag", step.user + " - turn " + step.row.turn +
+        " - " + step.row.intent + " - action " + step.row.action +
+        (step.row.tool ? " (" + step.row.tool + ")" : "")));
+      node.appendChild(el("div", "bubble me", step.row.text));
+      node.appendChild(el("div", "bubble bot", step.row.bot));
+    } else if (step.kind === "close") {
+      node = el("div", "closed", "Session " + step.session + " ended. The reflection and the summary episode were written to memory.");
+    } else {
+      node = el("div", "probe");
+      node.appendChild(el("div", "q", step.row.id + " (" + step.row.category + ", " + step.row.user + ") " + step.row.question));
+      node.appendChild(el("div", "exp", "expected: " + step.row.expected +
+        (step.row.evidence_turn ? " - evidence turn " + step.row.evidence_turn : "")));
+      const reply = el("div", "", "reply: " + step.row.reply);
+      if (step.row.passed !== undefined) reply.className = step.row.passed ? "ok" : "bad";
+      node.appendChild(reply);
+    }
+    if (i === at) { node.classList.add("now"); shown = node; }
+    box.appendChild(node);
+  }
+  if (shown) shown.scrollIntoView({block: "nearest"});
+  const step = steps[at];
+  $("step-label").textContent = "Step " + at + " of " + (steps.length - 1) + " - " + describe(step) +
+    " - memory of " + step.user;
+  $("step-back").disabled = at === 0;
+  $("step-restart").disabled = at === 0;
+  $("step-next").disabled = at === steps.length - 1;
+  $("step-session").disabled = at === steps.length - 1;
+  changedSlot = null;
+  renderState(mine(step.state, step.user));
+  renderRecalled(step.recalled || {facts: [], episodes: []}, step.slots || {});
+}
+
+function renderRun(data) {
+  if (!data.initial_state) {
+    note('<span class="error">This run has no saved state. Run it again: ' +
+      'uv run python -m src.run --config ' + data.config + ' --raw</span>');
+    return;
+  }
+  runInfo = data;
+  steps = buildSteps(data);
+  at = 0;
+  $("convo-title").textContent = "Saved run - " + data.config + " - " + data.run_id;
+  $("live").hidden = true;
+  $("replay").hidden = false;
+  $("stepper").hidden = false;
+  $("do-live").hidden = false;
+  showStep();
+}
+
+function go(to) {
+  at = Math.max(0, Math.min(steps.length - 1, to));
+  showStep();
+}
+
+function nextSessionEnd() {
+  // The next step that closes a session, or the very end.
+  for (let i = at + 1; i < steps.length; i++) {
+    if (steps[i].kind === "close") return i;
+  }
+  return steps.length - 1;
+}
+
+$("step-next").addEventListener("click", () => go(at + 1));
+$("step-back").addEventListener("click", () => go(at - 1));
+$("step-restart").addEventListener("click", () => go(0));
+$("step-session").addEventListener("click", () => go(nextSessionEnd()));
+
+document.addEventListener("keydown", (event) => {
+  if ($("stepper").hidden) return;
+  const tag = (event.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if (event.key === "ArrowRight") go(at + 1);
+  if (event.key === "ArrowLeft") go(at - 1);
+});
+
+async function loadRunList() {
+  const res = await fetch("/api/runs");
+  const names = (await res.json()).runs;
+  const select = $("run-config");
+  select.innerHTML = "";
+  for (const name of names) {
+    const option = document.createElement("option");
+    option.textContent = name;
+    select.appendChild(option);
+  }
+  if (!names.length) {
+    const option = document.createElement("option");
+    option.textContent = "no saved runs";
+    option.disabled = true;
+    select.appendChild(option);
+  }
+}
+
+$("do-load").addEventListener("click", async () => {
+  const config = $("run-config").value;
+  if (!config || config === "no saved runs") return;
+  const res = await fetch("/api/run?config=" + encodeURIComponent(config));
+  const data = await res.json();
+  if (!res.ok) { note('<span class="error">' + (data.error || res.statusText) + "</span>"); return; }
+  renderRun(data);
+});
+
+$("do-live").addEventListener("click", async () => {
+  $("replay").hidden = true;
+  $("stepper").hidden = true;
+  $("live").hidden = false;
+  $("do-live").hidden = true;
+  $("convo-title").textContent = "Conversation";
+  $("recalled").className = "empty";
+  $("recalled").textContent = "Nothing recalled yet.";
+  const res = await fetch("/api/state?user=" + $("user").value);
+  renderState((await res.json()).state);
+});
+
+loadRunList();
 fetch("/api/state?user=U1").then(r => r.json()).then(d => renderState(d.state));
 </script>
 </body>
