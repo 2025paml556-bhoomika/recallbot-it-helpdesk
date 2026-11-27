@@ -2,8 +2,8 @@
 
 Corporate IT helpdesk bot for PCA MZG517 Mini Project 1 (variant V06, twist A: multi-user isolation).
 
-**Chat model (every configuration):** `qwen2.5:3b` served by [Ollama](https://ollama.com).
-**Tokenizer (when a response has no usage field):** `Qwen/Qwen2.5-3B`.
+**Chat model (every configuration):** `qwen3:4b-instruct` served by [Ollama](https://ollama.com).
+**Tokenizer (when a response has no usage field):** `Qwen/Qwen2.5-3B` (Qwen3 shares its vocabulary).
 **Context window:** 4,096 tokens. **Short-term window k:** 4 turns.
 
 ## Setup
@@ -26,7 +26,7 @@ To change dependencies use `uv add <pkg>` / `uv remove <pkg>` (add `--dev` for t
 Ollama must be running with the chosen model pulled once:
 
 ```bash
-ollama pull qwen2.5:3b
+ollama pull qwen3:4b-instruct
 ollama serve   # if it is not already running
 ```
 

@@ -19,11 +19,16 @@ CONTEXT_WINDOW = 4096
 # Chat model. Ollama serves it locally; the Hugging Face id is the matching
 # tokenizer used when an API response has no usage field.
 #
-# The default is the model the project is written and tuned for. To use
-# another model that Ollama already has, set RECALLBOT_CHAT_MODEL, for
-# example RECALLBOT_CHAT_MODEL=qwen2.5:latest. The logs record the model
-# used, so a run made this way is not mistaken for a 3B run.
-CHAT_MODEL = os.environ.get("RECALLBOT_CHAT_MODEL", "qwen2.5:3b")
+# The default is qwen3:4b-instruct, the non-thinking build. Plain qwen3:4b is
+# the thinking-only build and spends thousands of tokens reasoning per call,
+# and no setting turns that off. To use another model that Ollama has, set
+# RECALLBOT_CHAT_MODEL, for example RECALLBOT_CHAT_MODEL=qwen2.5:3b. The logs
+# record the model used, so runs made with different models are not mixed up.
+#
+# TOKENIZER_MODEL is only used to count tokens against the prompt budget.
+# Qwen3 uses the same vocabulary as Qwen2.5, so the Qwen2.5 tokenizer counts
+# its prompts correctly and no second tokenizer has to be downloaded.
+CHAT_MODEL = os.environ.get("RECALLBOT_CHAT_MODEL", "qwen3:4b-instruct")
 TOKENIZER_MODEL = "Qwen/Qwen2.5-3B"
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 

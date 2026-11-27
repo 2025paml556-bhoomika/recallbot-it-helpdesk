@@ -20,7 +20,7 @@ import json
 import shutil
 
 from src.agent import Session
-from src.config import ABLATION_CONFIGS, ROOT
+from src.config import ABLATION_CONFIGS, ROOT, RUN_ID
 from src.memory import Memory
 from src.run_history import _passed, load_probes, load_turns
 from src.run_state import recalled_view, snapshot
@@ -47,7 +47,9 @@ def run_config(config: str, *, sessions: tuple[str, ...] = ("A", "B"), raw: bool
     root = RUNS_ROOT / config
     memory_root = root / "memory"
     db_path = root / "helpdesk.sqlite"
-    run_id = f"abl-{config}"
+    # RUN_ID changes per run (RECALLBOT_RUN_ID), so a rerun under another
+    # model never shares an id with the lines already in the call log.
+    run_id = f"abl-{config}-{RUN_ID}"
 
     # A run that starts at Session A starts from nothing. Without this a
     # second run would begin with the facts and bookings of the first, and

@@ -42,7 +42,7 @@ def test_t1_3_config_constants():
     assert isinstance(config.CHAT_MODEL, str) and config.CHAT_MODEL.strip()
     assert isinstance(config.RUN_ID, str) and config.RUN_ID.strip()
     # One model name is shared; the tokenizer id is the matching checkpoint.
-    assert config.CHAT_MODEL == "qwen2.5:3b"
+    assert config.CHAT_MODEL == "qwen3:4b-instruct"
     assert config.TOKENIZER_MODEL == "Qwen/Qwen2.5-3B"
 
 
